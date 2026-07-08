@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from datetime import timezone
 import hashlib
 import json
 from pathlib import Path
@@ -25,7 +26,7 @@ class VersionManager:
         data = {
             "tag": tag,
             "description": description,
-            "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.datetime.now(tz=timezone.utc).isoformat() + "Z",
             "metadata": metadata or {},
             "triple_count": len(triples),
             "triples": triples,

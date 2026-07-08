@@ -15,6 +15,16 @@ class OxigraphStore:
         self._server_thread: Optional[threading.Thread] = None
         self._server_running = False
         self._oxigraph_available = self._check_oxigraph()
+        self._triples_loaded = False
+
+    @classmethod
+    def load_existing(cls, store_path: Union[str, Path]) -> "OxigraphStore":
+        path = Path(store_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Oxigraph store not found: {store_path}")
+        store = cls(store_path=path)
+        store._get_store()
+        return store
 
     @staticmethod
     def _check_oxigraph() -> bool:

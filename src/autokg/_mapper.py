@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import polars as pl
+
+_logger = logging.getLogger(__name__)
 
 
 class RDFMapper:
@@ -30,45 +33,34 @@ class RDFMapper:
         if self.use_maplib and template is not None and hasattr(template, "template") and template.template:
             iri_col = "_iris_kg_iri"
             if iri_col in df.columns:
-                iri_values = df[iri_col].to_list()
-
                 mapped_df = df.clone()
                 mapped_df = mapped_df.with_columns(pl.col(iri_col).alias("_iri"))
 
                 param_cols = [p.variable.name for p in template.template.parameters]
-                cols_to_use = []
                 for pc in param_cols:
                     clean = pc.lstrip("_col_").lstrip("_fk_")
                     if pc.startswith("_col_"):
-                        vn = pc
                         if clean in mapped_df.columns:
-                            cols_to_use.append(clean)
-                            mapped_df = mapped_df.with_columns(pl.col(clean).alias(vn))
+                            mapped_df = mapped_df.with_columns(pl.col(clean).alias(pc))
                         else:
-                            for dmc in mapped_df.columns:
-                                if sanitize_for_compare(dmc) == sanitize_for_compare(clean):
-                                    cols_to_use.append(dmc)
-                                    mapped_df = mapped_df.with_columns(pl.col(dmc).alias(vn))
+                            for col in mapped_df.columns:
+                                if sanitize_for_compare(col) == sanitize_for_compare(clean):
+                                    mapped_df = mapped_df.with_columns(pl.col(col).alias(pc))
                                     break
                     elif pc.startswith("_fk_"):
                         fk_col = f"_iris_kg_fk_{clean}"
-                        vn = pc
                         if fk_col in mapped_df.columns:
-                            cols_to_use.append(fk_col)
-                            mapped_df = mapped_df.with_columns(pl.col(fk_col).alias(vn))
+                            mapped_df = mapped_df.with_columns(pl.col(fk_col).alias(pc))
 
                 try:
                     self.model.map(template.template, mapped_df)
-                except Exception:
+                except Exception as e:
+                    _logger.warning("maplib map() failed (%s), falling back to manual triples", type(e).__name__)
                     manual = template.generate_triples_manual(df)
                     self._add_manual_triples(manual)
             else:
-                if pk_column and pk_column in df.columns:
-                    manual = template.generate_triples_manual(df, iri_col=pk_column)
-                    self._add_manual_triples(manual)
-                else:
-                    manual = template.generate_triples_manual(df)
-                    self._add_manual_triples(manual)
+                manual = template.generate_triples_manual(df)
+                self._add_manual_triples(manual)
         else:
             if hasattr(template, "generate_triples_manual"):
                 manual = template.generate_triples_manual(df)
@@ -84,16 +76,16 @@ class RDFMapper:
         if self.use_maplib and self._model is not None and hasattr(self._model, "query"):
             try:
                 return self.model.query(sparql)
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.warning("maplib query failed: %s", e)
         return None
 
     def insert_construct(self, sparql: str) -> "RDFMapper":
         if self.use_maplib and self._model is not None and hasattr(self._model, "insert"):
             try:
                 self.model.insert(sparql)
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.warning("maplib insert_construct failed: %s", e)
         return self
 
     def _add_manual_triples(self, triples: list[dict[str, Any]]):
@@ -108,8 +100,8 @@ class RDFMapper:
                 result = self.model.query("SELECT (COUNT(*) AS ?c) WHERE { ?s ?p ?o }")
                 if result is not None and result.height > 0:
                     return result["c"][0]
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.warning("maplib count_triples failed: %s", e)
         return len(self._triples)
 
     def serialize(self, path: Union[str, Path], format: str = "turtle") -> str:
@@ -127,7 +119,19 @@ class RDFMapper:
         return serialize_triples(self._triples, path, fmt)
 
     def to_jsonld(self) -> dict:
-        return {"@context": {"schema": "https://schema.org/", "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"}, "@graph": self._triples}
+        nodes = []
+        for t in self._triples:
+            subj = t.get("subject", "")
+            pred = t.get("predicate", "")
+            obj = t.get("object", "")
+            if t.get("is_iri") or t.get("object_iri"):
+                obj_node = {"@id": obj}
+            else:
+                obj_node = {"@value": obj}
+                if t.get("datatype"):
+                    obj_node["@type"] = t["datatype"]
+            nodes.append({"@id": subj, pred: [obj_node]})
+        return {"@context": {"schema": "https://schema.org/", "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"}, "@graph": nodes}
 
 
 def sanitize_for_compare(s: str) -> str:

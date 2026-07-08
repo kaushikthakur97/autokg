@@ -53,7 +53,28 @@ def serialize_triples(
             lines.append("")
 
     elif fmt in (JSONLD, JSON_LD):
-        graph = {"@context": PREFIX_MAP, "@graph": triples}
+        node_map: dict[str, dict] = {}
+        for t in triples:
+            subj = t.get("subject", "")
+            pred = t.get("predicate", "")
+            obj = t.get("object", "")
+            if subj not in node_map:
+                node_map[subj] = {"@id": subj}
+            if t.get("is_iri") or t.get("object_iri"):
+                obj_node = {"@id": obj}
+            else:
+                obj_node = {"@value": obj}
+                if t.get("datatype"):
+                    obj_node["@type"] = t["datatype"]
+            if pred in node_map[subj]:
+                existing = node_map[subj][pred]
+                if isinstance(existing, list):
+                    existing.append(obj_node)
+                else:
+                    node_map[subj][pred] = [existing, obj_node]
+            else:
+                node_map[subj][pred] = obj_node
+        graph = {"@context": PREFIX_MAP, "@graph": list(node_map.values())}
         path.write_text(json.dumps(graph, indent=2, default=str), encoding="utf-8")
         return str(path)
 
@@ -183,29 +204,29 @@ def push_to_sparql_endpoint(
     except ImportError:
         raise ImportError("httpx required for SPARQL endpoint push. Install with: pip install httpx")
 
-    tmp = Path(tempfile.gettempdir()) / "autokg_push.nt"
-    serialize_triples(triples, tmp, format="ntriples")
-    data = tmp.read_text(encoding="utf-8")
-
-    headers = {"Content-Type": "application/sparql-update"}
-    graph_clause = f"GRAPH <{graph_uri}> {{" if graph_uri else ""
-    graph_close = "}" if graph_uri else ""
-    update_query = f"INSERT DATA {{ {graph_clause} {data} {graph_close} }}"
-
-    kwargs = {}
-    if auth:
-        kwargs["auth"] = auth
-
-    client = httpx.Client(timeout=60)
+    import uuid
+    tmp = Path(tempfile.gettempdir()) / f"autokg_push_{uuid.uuid4().hex}.nt"
     try:
-        if method.upper() == "POST":
-            response = client.post(endpoint_url, content=update_query, headers=headers, **kwargs)
-        else:
-            response = client.put(endpoint_url, content=data, headers={"Content-Type": "application/n-triples"}, **kwargs)
-        tmp.unlink(missing_ok=True)
+        serialize_triples(triples, tmp, format="ntriples")
+        data = tmp.read_text(encoding="utf-8")
+
+        headers = {"Content-Type": "application/sparql-update"}
+        graph_clause = f"GRAPH <{graph_uri}> {{" if graph_uri else ""
+        graph_close = "}" if graph_uri else ""
+        update_query = f"INSERT DATA {{ {graph_clause} {data} {graph_close} }}"
+
+        kwargs = {}
+        if auth:
+            kwargs["auth"] = auth
+
+        with httpx.Client(timeout=60) as client:
+            if method.upper() == "POST":
+                response = client.post(endpoint_url, content=update_query, headers=headers, **kwargs)
+            else:
+                response = client.put(endpoint_url, content=data, headers={"Content-Type": "application/n-triples"}, **kwargs)
         return 200 <= response.status_code < 300
     finally:
-        client.close()
+        tmp.unlink(missing_ok=True)
 
 
 def write_triples(

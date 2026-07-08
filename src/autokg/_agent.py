@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Callable, Optional
 
 import polars as pl
+
+_agent_logger = logging.getLogger(__name__)
 
 
 class GraphAgent:
@@ -36,6 +39,46 @@ class GraphAgent:
     def explain(self, question: str) -> tuple[str, str]:
         sparql = self._generate_sparql(question)
         return sparql, f"Question: {question}"
+
+    def explain_full(self, question: str) -> dict:
+        sparql = self._generate_sparql(question)
+        result = self._execute(sparql)
+        return {
+            "question": question,
+            "sparql": sparql,
+            "result_count": result.height if result is not None else 0,
+            "confidence": self._compute_confidence(sparql),
+            "suggested_followups": self._suggest_followups(question, result),
+        }
+
+    def _compute_confidence(self, sparql: str) -> float:
+        score = 0.5
+        if "FILTER" in sparql.upper():
+            score += 0.1
+        if "GROUP BY" in sparql.upper():
+            score += 0.1
+        if "ORDER BY" in sparql.upper():
+            score += 0.05
+        if "SELECT" in sparql.upper() and "WHERE" in sparql.upper():
+            score += 0.15
+        if sparql.count("{") == sparql.count("}") and sparql.count("{") > 0:
+            score += 0.1
+        return min(score, 0.95)
+
+    def _suggest_followups(self, question: str, result: Optional[pl.DataFrame]) -> list[str]:
+        suggestions: list[str] = []
+        if result is None or result.height == 0:
+            return ["Can you rephrase your question?", "Try asking about specific entities or properties."]
+        if result.height > 10:
+            suggestions.append(f"Can you filter these {result.height} results by a specific criteria?")
+        if result.height > 1:
+            suggestions.append("Which of these has the highest value?")
+        suggestions.append("Show me more details about the first result.")
+        if "order" in question.lower():
+            suggestions.append("Show me the customers who placed these orders.")
+        if "customer" in question.lower():
+            suggestions.append("Show me all orders for these customers.")
+        return suggestions[:3]
 
     def rag(self, question: str, depth: int = 2, max_results: int = 10) -> str:
         summary = self._get_ontology_summary()
@@ -77,7 +120,7 @@ Return ONLY the SPARQL query, nothing else. No markdown, no explanation. Just th
         response = self._call_llm(prompt)
         query = self._extract_sparql(response)
         if not query.strip().upper().startswith(("SELECT", "PREFIX", "CONSTRUCT", "ASK", "DESCRIBE")):
-            query = f"SELECT * WHERE {{ ?s ?p ?o }} LIMIT {max_rows}"
+            query = "SELECT * WHERE { ?s ?p ?o } LIMIT 50"
 
         return query
 
@@ -205,17 +248,18 @@ SELECT ?customer ?name ?order WHERE { ?customer ex:country "Norway" ; ex:name ?n
     def _traverse_subgraph(self, entity_text: str, depth: int = 2) -> list[str]:
         fragments: list[str] = []
         try:
+            safe_text = entity_text.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
             result = self.kg.query(f"""
                 SELECT ?s ?p ?o WHERE {{
                     ?s ?p ?o .
-                    FILTER(CONTAINS(LCASE(STR(?s)), "{entity_text}") || CONTAINS(LCASE(STR(?o)), "{entity_text}"))
+                    FILTER(CONTAINS(LCASE(STR(?s)), "{safe_text}") || CONTAINS(LCASE(STR(?o)), "{safe_text}"))
                 }} LIMIT 20
             """)
             if result is not None:
                 for row in result.iter_rows(named=True):
                     fragments.append(f"{row.get('s', '')} {row.get('p', '')} {row.get('o', '')} .")
-        except Exception:
-            pass
+        except Exception as e:
+            _agent_logger.warning("Subgraph traversal failed: %s", e)
         return fragments
 
     @staticmethod

@@ -22,6 +22,7 @@ def main():
     _ask_parser(subparsers)
     _profile_parser(subparsers)
     _diff_parser(subparsers)
+    _mcp_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -111,6 +112,7 @@ def _query_parser(subparsers):
     p = subparsers.add_parser("query", help="Execute SPARQL query")
     p.add_argument("query", help="SPARQL query string or path to .sparql file")
     p.add_argument("--endpoint", "-e", help="SPARQL endpoint URL")
+    p.add_argument("--store", "-s", help="Path to Oxigraph store directory")
     p.add_argument("--output", "-o", default="json", choices=["json", "csv", "table"], help="Output format")
 
     def handler(args):
@@ -127,11 +129,14 @@ def _query_parser(subparsers):
                 print(json.dumps(data, indent=2))
             else:
                 _print_sparql_results(data, args.output)
-        else:
+        elif args.store:
             from ._oxigraph import OxigraphStore
-            store = OxigraphStore()
+            store = OxigraphStore.load_existing(args.store)
             results = store.query(query)
             print(json.dumps(results, indent=2, default=str))
+        else:
+            print("Error: Provide --store <path> or --endpoint <url>", file=sys.stderr)
+            sys.exit(1)
 
     p.set_defaults(handler=handler)
 
@@ -177,7 +182,7 @@ def _ask_parser(subparsers):
         from ._core import KnowledgeGraph
         from ._agent import GraphAgent
 
-        kg = KnowledgeGraph(store_path=args.store)
+        kg = KnowledgeGraph.from_store(args.store)
         agent = GraphAgent(kg, provider=args.provider, model=args.model, verbose=True)
 
         question = " ".join(args.question)
@@ -302,6 +307,28 @@ def _build_from_config(args):
         print(f"Store saved: {store_path}")
 
     print(f"Total triples: {kg.triple_count}")
+
+
+def _mcp_parser(subparsers):
+    p = subparsers.add_parser("mcp", help="Start MCP server (Model Context Protocol) for AI agents")
+    p.add_argument("--store", "-s", required=True, help="Path to knowledge graph store")
+    p.add_argument("--stdio", action="store_true", default=True, help="Stdio mode (for Claude Desktop)")
+    p.add_argument("--port", "-p", type=int, default=9000, help="HTTP port (0 = stdio only)")
+    p.add_argument("--host", default="0.0.0.0", help="HTTP host")
+
+    def handler(args):
+        from ._core import KnowledgeGraph
+        kg = KnowledgeGraph.from_store(args.store)
+        if args.port > 0 and not args.stdio:
+            from .server._transport import run_http
+            print(f"MCP server starting on http://{args.host}:{args.port}")
+            run_http(kg, host=args.host, port=args.port)
+        else:
+            from .server._transport import run_stdio
+            print("MCP server starting in stdio mode (connect from Claude Desktop, Cursor, etc.)", file=sys.stderr)
+            run_stdio(kg)
+
+    p.set_defaults(handler=handler)
 
 
 def _print_sparql_results(data: dict, format: str):

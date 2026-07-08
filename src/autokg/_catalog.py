@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import datetime
+from datetime import timezone
 from typing import Optional
 
 import polars as pl
 
-from ._types import DCAT, DCTERMS, PROV, SCHEMA, FOAF
+from ._types import DCAT, DCTERMS, PROV, SCHEMA, FOAF, RDF
 
 
 class CatalogGenerator:
@@ -26,7 +27,7 @@ class CatalogGenerator:
         self.theme = theme
         self._datasets: list[dict] = []
         self._catalog_iri = f"{self.namespace}/catalog"
-        self._generated_at = datetime.datetime.utcnow().isoformat() + "Z"
+        self._generated_at = datetime.datetime.now(tz=timezone.utc).isoformat()
 
     def add_dataset(
         self,
@@ -53,14 +54,14 @@ class CatalogGenerator:
         triples: list[dict] = []
 
         cat = self._catalog_iri
-        triples.append({"subject": cat, "predicate": f"{RDF}t", "object_iri": True, "object": f"{DCAT}Catalog"})
+        triples.append({"subject": cat, "predicate": f"{RDF}type", "object_iri": True, "object": f"{DCAT}Catalog"})
         triples.append({"subject": cat, "predicate": f"{DCTERMS}title", "object": self.title, "datatype": "http://www.w3.org/2001/XMLSchema#string"})
         triples.append({"subject": cat, "predicate": f"{DCTERMS}description", "object": self.description, "datatype": "http://www.w3.org/2001/XMLSchema#string"})
         triples.append({"subject": cat, "predicate": f"{DCTERMS}issued", "object": self._generated_at, "datatype": "http://www.w3.org/2001/XMLSchema#dateTime"})
 
         if self.publisher:
             pub_iri = f"{self.namespace}/publisher"
-            triples.append({"subject": pub_iri, "predicate": f"{RDF}t", "object_iri": True, "object": f"{FOAF}Organization"})
+            triples.append({"subject": pub_iri, "predicate": f"{RDF}type", "object_iri": True, "object": f"{FOAF}Organization"})
             triples.append({"subject": pub_iri, "predicate": f"{FOAF}name", "object": self.publisher, "datatype": "http://www.w3.org/2001/XMLSchema#string"})
             if self.publisher_url:
                 triples.append({"subject": pub_iri, "predicate": f"{FOAF}homepage", "object_iri": True, "object": self.publisher_url})
@@ -71,14 +72,14 @@ class CatalogGenerator:
 
         for ds in self._datasets:
             ds_iri = ds["iri"]
-            triples.append({"subject": ds_iri, "predicate": f"{RDF}t", "object_iri": True, "object": f"{DCAT}Dataset"})
+            triples.append({"subject": ds_iri, "predicate": f"{RDF}type", "object_iri": True, "object": f"{DCAT}Dataset"})
             triples.append({"subject": cat, "predicate": f"{DCAT}dataset", "object_iri": True, "object": ds_iri})
             triples.append({"subject": ds_iri, "predicate": f"{DCTERMS}title", "object": ds["name"], "datatype": "http://www.w3.org/2001/XMLSchema#string"})
             if ds["description"]:
                 triples.append({"subject": ds_iri, "predicate": f"{DCTERMS}description", "object": ds["description"], "datatype": "http://www.w3.org/2001/XMLSchema#string"})
 
             dist_iri = f"{ds_iri}/distribution"
-            triples.append({"subject": dist_iri, "predicate": f"{RDF}t", "object_iri": True, "object": f"{DCAT}Distribution"})
+            triples.append({"subject": dist_iri, "predicate": f"{RDF}type", "object_iri": True, "object": f"{DCAT}Distribution"})
             triples.append({"subject": ds_iri, "predicate": f"{DCAT}distribution", "object_iri": True, "object": dist_iri})
             triples.append({"subject": dist_iri, "predicate": f"{DCAT}mediaType", "object": f"application/{ds['distribution_format']}", "datatype": "http://www.w3.org/2001/XMLSchema#string"})
 
@@ -113,6 +114,3 @@ class CatalogGenerator:
                 obj = f'"{escaped}"^^<{dt}>'
             lines.append(f"{subj} {pred} {obj} .")
         return "\n".join(lines)
-
-
-RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"

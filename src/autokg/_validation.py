@@ -90,7 +90,40 @@ class ShaclValidator:
             "warnings": [],
             "info": [],
         }
-
+        if shapes_path:
+            issues["info"].append({
+                "severity": "info",
+                "message": f"SHACL shapes file provided: {shapes_path}. "
+                           f"Full SHACL validation requires pyoxigraph. "
+                           f"Install with: pip install pyoxigraph"
+            })
+        if not triples:
+            issues["info"].append({"severity": "info", "message": "No triples to validate"})
+            return issues
+        subjects_seen: set[str] = set()
+        for t in triples:
+            subj = t.get("subject", "")
+            pred = t.get("predicate", "")
+            obj = t.get("object", "")
+            if not subj:
+                issues["violations"].append({
+                    "severity": "violation",
+                    "message": "Triple with empty subject found",
+                    "triple": str(t)[:200],
+                })
+                issues["conforms"] = False
+            if not pred:
+                issues["violations"].append({
+                    "severity": "violation",
+                    "message": "Triple with empty predicate found",
+                    "triple": str(t)[:200],
+                })
+                issues["conforms"] = False
+            subjects_seen.add(subj)
+        issues["info"].append({
+            "severity": "info",
+            "message": f"Validated {len(triples)} triples with {len(subjects_seen)} unique subjects",
+        })
         return issues
 
     def validate_dataframe(

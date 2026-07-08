@@ -93,7 +93,7 @@ class GraphProfiler:
         for t in triples:
             if t.get("is_iri") or t.get("object_iri"):
                 obj = t.get("object", "")
-                if obj in subjects or obj not in subjects:
+                if obj in subjects:
                     subjects_referenced.add(obj)
 
         orphan_count = len(subjects - subjects_referenced)

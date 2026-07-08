@@ -78,6 +78,15 @@ class KnowledgeGraph:
         kg.add_table(source, entity_type=entity_type, id_column=id_column, property_map=property_map, relationships=relationships)
         return kg
 
+    @classmethod
+    def from_store(cls, store_path: Union[str, Path], namespace: str = "http://example.org/", **kwargs) -> "KnowledgeGraph":
+        kg = cls(namespace=namespace, **kwargs)
+        kg._oxigraph = OxigraphStore(store_path=str(store_path), read_only=True)
+        if store_path and Path(store_path).exists():
+            kg._oxigraph._get_store()
+        kg._built = True
+        return kg
+
     def add_table(
         self,
         source: Union[str, Path, pl.DataFrame, Any],
@@ -110,6 +119,13 @@ class KnowledgeGraph:
             row_count=df.height,
         )
 
+        return self
+
+    def remove_table(self, name: str) -> "KnowledgeGraph":
+        if name in self._tables:
+            del self._tables[name]
+        if name in self._templates:
+            del self._templates[name]
         return self
 
     def add_delta_table(
@@ -247,7 +263,9 @@ class KnowledgeGraph:
     def serve(self, host: str = "localhost", port: int = 7878) -> str:
         if self._oxigraph is None:
             self._oxigraph = OxigraphStore(store_path=self.store_path)
-        self._oxigraph.add_triples(self._mapper.get_triples())
+        if not getattr(self._oxigraph, '_triples_loaded', False):
+            self._oxigraph.add_triples(self._mapper.get_triples())
+            self._oxigraph._triples_loaded = True
         return self._oxigraph.serve(host=host, port=port)
 
     def save_store(self, path: Optional[str] = None) -> str:

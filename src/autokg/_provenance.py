@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import datetime
+from datetime import timezone
 import os
 import platform
-import socket
 import uuid
 from typing import Optional
 
@@ -15,7 +15,7 @@ class ProvenanceTracker:
         self.namespace = namespace.rstrip("/#")
         self.pipeline_name = pipeline_name
         self._run_id = str(uuid.uuid4())
-        self._run_started = datetime.datetime.utcnow()
+        self._run_started = datetime.datetime.now(tz=timezone.utc)
         self._run_iri = f"{self.namespace}/pipeline/run/{self._run_id}"
         self._agent_iri = f"{self.namespace}/agent/{platform.node() or 'autokg-worker'}"
         self._activities: list[dict] = []
@@ -54,7 +54,7 @@ class ProvenanceTracker:
             "description": description,
             "used": used_entities or [],
             "generated": generated_entities or [],
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.datetime.now(tz=timezone.utc).isoformat(),
         })
         return activity_iri
 
@@ -91,7 +91,7 @@ class ProvenanceTracker:
         return triples
 
     def finish(self) -> dict:
-        duration = (datetime.datetime.utcnow() - self._run_started).total_seconds()
+        duration = (datetime.datetime.now(tz=timezone.utc) - self._run_started).total_seconds()
         return {
             "run_id": self._run_id,
             "run_iri": self._run_iri,
