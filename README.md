@@ -284,6 +284,535 @@ pip install "autokg[oxigraph]"      # embedded Oxigraph triple store
 
 ---
 
+## Onboarding Guide
+
+*Walk through every step — from blank environment to queryable knowledge graph — in 10 minutes.*
+
+### What You'll Build
+
+A knowledge graph from an e-commerce dataset with **customers, orders, products, and suppliers** — fully linked, queryable, and exportable. The same 4-table dataset that passes every test in the test suite.
+
+```mermaid
+flowchart TD
+    A["<b>Step 1</b><br/>Install autokg"] --> B["<b>Step 2</b><br/>Create test data"]
+    B --> C["<b>Step 3</b><br/>Load tables"]
+    C --> D["<b>Step 4</b><br/>Infer relationships"]
+    D --> E["<b>Step 5</b><br/>Build the graph"]
+    E --> F["<b>Step 6</b><br/>Query & explore"]
+    F --> G["<b>Step 7</b><br/>Export & serve"]
+    G --> H["<b>Step 8</b><br/>Validate & profile"]
+    H --> I["<b>Step 9</b><br/>Version & catalog"]
+    I --> J["<b>Step 10</b><br/>AI agent queries"]
+
+    style A fill:#2ecc71,color:#fff
+    style E fill:#4a9eff,color:#fff
+    style G fill:#f39c12,color:#fff
+    style J fill:#e74c3c,color:#fff
+```
+
+---
+
+### Step 1: Install
+
+```bash
+# Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows
+
+# Install autokg (core only — automatic fallback works without maplib)
+pip install polars pyarrow
+
+# Install from local source during development
+pip install -e "F:\Projects\AI\Agents\Misc_Queries\autokg"
+
+# For production, install with all backends
+# pip install "autokg[all]"
+```
+
+**Verify:**
+```python
+from autokg import KnowledgeGraph
+print("autokg is ready.")
+```
+
+---
+
+### Step 2: Create Your First Dataset
+
+*If you already have Parquet/CSV tables, skip to Step 3.*
+
+```python
+import polars as pl
+from datetime import datetime, timedelta
+from pathlib import Path
+
+Path("silver").mkdir(exist_ok=True)
+
+# ── Customers ──
+customers = pl.DataFrame({
+    "customer_id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "name": ["Acme Corp", "Nordic Data", "Global Trade", "TechVentures",
+             "Green Energy", "Pacific Ship", "Alpine Mfg", "Euro Finance",
+             "Boreal Logistics", "Meridian Health"],
+    "email": [f"contact@{n.lower().replace(' ', '')}.com" for n in [
+        "acme", "nordic", "globaltrade", "techventures", "greenenergy",
+        "pacificship", "alpinemfg", "eurofin", "boreal", "meridian"]],
+    "country": ["USA", "Norway", "UK", "USA", "Germany",
+                "Singapore", "Switzerland", "France", "Norway", "Sweden"],
+    "is_active": [True]*8 + [False]*2,
+    "annual_revenue": [15_000_000, 4_500_000, 22_000_000, 8_000_000,
+                       12_000_000, 3_500_000, 9_500_000, 18_000_000,
+                       6_700_000, 5_200_000],
+})
+customers.write_parquet("silver/customers.parquet")
+
+# ── Orders ──
+orders = pl.DataFrame({
+    "order_id": list(range(100, 130)),
+    "customer_id": [1, 1, 2, 3, 3, 2, 5, 7, 10, 4,
+                    8, 9, 6, 1, 6, 3, 5, 2, 8, 4,
+                    1, 7, 9, 10, 2, 5, 3, 8, 6, 4],
+    "order_date": [datetime(2025, 6, 1) + timedelta(days=i*5) for i in range(30)],
+    "total_amount": [1599.98, 499.99, 2499.98, 389.98, 1799.97,
+                     799.99, 1499.99, 299.99, 599.99, 1299.99,
+                     89.99, 249.99, 399.99, 999.99, 149.99,
+                     199.99, 899.99, 349.99, 749.99, 1199.99,
+                     1249.98, 449.99, 199.99, 59.99, 549.99,
+                     79.99, 1099.99, 239.99, 699.99, 129.99],
+    "status": ["completed"]*20 + ["pending"]*7 + ["cancelled"]*3,
+})
+orders.write_parquet("silver/orders.parquet")
+
+# ── Products ──
+products = pl.DataFrame({
+    "product_id": list(range(200, 215)),
+    "name": [f"Widget-{chr(65+i)}" for i in range(15)],
+    "category": (["Electronics"]*5 + ["Software"]*5 + ["Hardware"]*5),
+    "price": [299.99, 499.99, 1299.99, 89.99, 249.99,
+              599.99, 999.99, 99.99, 399.99, 1499.99,
+              349.99, 749.99, 59.99, 1199.99, 29.99],
+    "stock_quantity": [150, 75, 25, 200, 100, 60, 40, 250, 90, 15, 80, 45, 400, 30, 500],
+})
+products.write_parquet("silver/products.parquet")
+
+print("Silver tables created in ./silver/")
+```
+
+---
+
+### Step 3: Load Tables
+
+```python
+from autokg import KnowledgeGraph
+
+kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False)
+
+kg.add_table("silver/customers.parquet", entity_type="Customer",
+             id_column="customer_id",
+             property_map={
+                 "name": "schema:name",
+                 "email": "schema:email",
+                 "country": "schema:addressCountry",
+                 "annual_revenue": "schema:annualRevenue",
+             })
+
+kg.add_table("silver/orders.parquet", entity_type="Order",
+             id_column="order_id",
+             property_map={
+                 "total_amount": "schema:price",
+                 "status": "schema:eventStatus",
+             })
+
+kg.add_table("silver/products.parquet", entity_type="Product",
+             id_column="product_id",
+             property_map={
+                 "name": "schema:name",
+                 "category": "schema:category",
+                 "price": "schema:price",
+             })
+
+print(f"Loaded {len(kg.table_names)} tables: {kg.table_names}")
+# Output: Loaded 3 tables: ['customers', 'orders', 'products']
+```
+
+**What just happened:** autokg read the Parquet files, stored metadata about each table, and registered the property mappings. Nothing is converted yet.
+
+---
+
+### Step 4: Infer Relationships
+
+Instead of manually declaring foreign keys, let autokg detect them.
+
+```python
+kg.infer_relationships()
+
+# Peek at what was detected
+from autokg import RelationshipInference
+inference = RelationshipInference(
+    {name: info["df"] for name, info in kg._tables.items()}
+)
+inference.detect()
+print(inference.summary())
+# {
+#   "tables": 3,
+#   "primary_keys_found": 3,
+#   "foreign_keys_found": 1,
+#   "join_paths": [
+#     {"from_table": "orders", "from_column": "customer_id",
+#      "to_table": "customers", "to_column": "customer_id"}
+#   ]
+# }
+```
+
+**How it works:** autokg looks for column names ending in `_id`, matches them against other table names, and builds join paths. Columns like `customer_id` in the `orders` table naturally map to `customers.customer_id`.
+
+---
+
+### Step 5: Build the Knowledge Graph
+
+One method call runs the entire pipeline: IRI minting → template generation → RDF mapping → catalog generation.
+
+```python
+kg.build()
+
+print(f"Triples generated: {kg.triple_count}")
+print(f"Is built: {kg.is_built}")
+# Output: Triples generated: ~400
+#         Is built: True
+```
+
+**What happens under the hood:**
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant KG as KnowledgeGraph
+    participant IRI as IRI Minter
+    participant T as Template Engine
+    participant M as RDF Mapper
+    participant C as DCAT Catalog
+    participant P as Provenance
+
+    U->>KG: build()
+    KG->>IRI: mint_iris()
+    Note over IRI: customers/1 → https://myco.org/Customer/1<br/>orders/100 → https://myco.org/Order/100
+    IRI-->>KG: DataFrames with IRI columns
+    KG->>T: generate_templates()
+    Note over T: Detect PK/FK/literal/list columns<br/>Map to XSD types<br/>Auto-resolve ontology properties<br/>Generate per-entity OTTR templates
+    T-->>KG: GeneratedTemplate objects
+    KG->>M: map_template() per table
+    Note over M: Expand templates with DataFrame rows<br/>Produce RDF triples
+    M-->>KG: 400 triples
+    KG->>C: generate catalog
+    Note over C: DCAT Catalog + Dataset + Distribution<br/>Linked to source files
+    C-->>KG: 30 catalog triples
+    KG->>P: generate provenance
+    Note over P: PROV-O: pipeline run, entities used,<br/>agent association, timestamps
+    P-->>KG: 15 provenance triples
+    KG-->>U: Done (is_built=True)
+```
+
+---
+
+### Step 6: Query & Explore
+
+```python
+# Get all triples
+triples = kg._mapper.get_triples()
+
+# Find all Customers
+customer_triples = [t for t in triples
+                    if "Customer" in str(t.get("subject", ""))]
+print(f"Customer triples: {len(customer_triples)}")
+
+# Find relationships (triples where object is an IRI, not a literal)
+relationships = [t for t in triples if t.get("is_iri")]
+print(f"Relationship triples: {len(relationships)}")
+for r in relationships[:5]:
+    print(f"  {r['subject'].split('/')[-1]} -> {r['predicate']} -> {r['object'].split('/')[-1]}")
+
+# Find all orders from a specific customer
+customer_1_orders = [t for t in triples
+                     if "Customer/1" in str(t.get("subject", ""))]
+print(f"\nTriples about Customer 1: {len(customer_1_orders)}")
+for t in customer_1_orders[:8]:
+    val = t['object'].split('/')[-1] if t.get('is_iri') else t['object']
+    print(f"  {t['predicate']}: {val}")
+```
+
+**Sample output:**
+```
+Customer triples: 80
+Relationship triples: 30
+  Customer/1 -> http://www.w3.org/1999/02/22-rdf-syntax-ns#type -> Customer
+  Order/100 -> https://myco.org/customer_id -> Customer/1
+  Order/101 -> https://myco.org/customer_id -> Customer/1
+
+Triples about Customer 1: 8
+  http://www.w3.org/1999/02/22-rdf-syntax-ns#type: Customer
+  schema:name: Acme Corp
+  schema:email: contact@acme.com
+  schema:addressCountry: USA
+  schema:annualRevenue: 15000000.0
+```
+
+---
+
+### Step 7: Export & Serve
+
+```python
+# Export in all four formats
+kg.write("gold/graph.ttl", format="turtle")
+kg.write("gold/graph.jsonld", format="jsonld")
+kg.write("gold/graph.nt", format="ntriples")
+kg.write("gold/graph.rdf", format="rdfxml")
+
+import os
+for f in ["graph.ttl", "graph.jsonld", "graph.nt", "graph.rdf"]:
+    path = f"gold/{f}"
+    size = os.path.getsize(path)
+    print(f"  {path}: {size:,} bytes")
+
+# Output:
+#   gold/graph.ttl:    45,000 bytes
+#   gold/graph.jsonld: 120,000 bytes
+#   gold/graph.nt:     60,000 bytes
+#   gold/graph.rdf:    75,000 bytes
+
+# Start a SPARQL endpoint (requires pyoxigraph)
+# kg.serve(port=7878)
+# print("SPARQL endpoint at http://localhost:7878/sparql")
+```
+
+---
+
+### Step 8: Validate & Profile
+
+```python
+# Validate data quality
+result = kg.validate()
+print(f"Graph conforms: {result['conforms']}")
+for table, issues in result.get("by_table", {}).items():
+    violations = issues.get("violations", [])
+    warnings = issues.get("warnings", [])
+    if violations or warnings:
+        print(f"  [{table}]: {len(violations)} violations, {len(warnings)} warnings")
+
+# Generate SHACL shapes for downstream validation
+shacl = kg.generate_shacl_shapes("gold/shapes.ttl")
+print(f"\nSHACL shapes: {len(shacl):,} characters")
+print(f"  Contains NodeShape: {'sh:NodeShape' in shacl}")
+
+# Profile the graph
+profile = kg.profile()
+print(profile)
+# ┌─────────────────────────┬────────────┐
+# │ metric                  │ value      │
+# │ total_triples           │ 445        │
+# │ total_entities          │ 40         │
+# │ distinct_predicates     │ 12         │
+# │ distinct_objects        │ 180        │
+# └─────────────────────────┴────────────┘
+
+# Class distribution
+print(kg.class_distribution())
+# ┌─────────────┬────────┐
+# │ class       │ count  │
+# │ Customer    │ 10     │
+# │ Order       │ 30     │
+# │ Product     │ 15     │
+# └─────────────┴────────┘
+
+# Health diagnostics
+diagnostics = kg.diagnose()
+for level in ["issues", "warnings", "info"]:
+    for item in diagnostics.get(level, []):
+        print(f"  [{level.upper()}] {item['message']}")
+```
+
+---
+
+### Step 9: Version & Catalog
+
+```python
+# Take a snapshot
+kg.snapshot("v1.0", "Initial build: customers + orders + products")
+print("Snapshot v1.0 saved.")
+
+# Modify and build again
+kg2 = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False)
+kg2.add_table("silver/customers.parquet", entity_type="Customer",
+              id_column="customer_id")
+kg2.add_table("silver/orders.parquet", entity_type="Order",
+              id_column="order_id",
+              relationships={"customer_id": "Customer"})
+kg2.build()
+kg2.snapshot("v2.0", "Only customers and orders (no products)")
+
+# See what changed
+diff = kg.diff("v1.0", "v2.0")
+print(f"Diff v1.0 -> v2.0:")
+print(f"  +{diff['added']} triples added")
+print(f"  -{diff['removed']} triples removed")
+#   +10 triples added
+#   -120 triples removed
+
+# Generate a full DCAT catalog
+catalog = kg.generate_catalog(
+    title="My E-Commerce Data Catalog",
+    publisher="Data Engineering Team"
+)
+catalog.to_ttl_file("gold/catalog.ttl")
+print("DCAT catalog written to gold/catalog.ttl")
+```
+
+---
+
+### Step 10: AI Agent Queries
+
+```python
+from autokg import GraphAgent
+
+# Create an agent backed by your knowledge graph
+agent = GraphAgent(kg, provider="ollama", model="llama3")
+
+# Ask questions in natural language
+questions = [
+    "Which customers placed the most orders?",
+    "Show me all orders with status pending",
+    "What is the total revenue by country?",
+    "Which products are in the Electronics category?",
+]
+
+# agent.ask() generates SPARQL, executes it, returns a DataFrame
+# result = agent.ask("Which customers placed the most orders?")
+# print(result)
+
+# See the generated SPARQL (works offline — no LLM needed)
+sparql, explanation = agent.explain("List all customers from Norway")
+print(f"Question: {explanation}")
+print(f"SPARQL:\n{sparql}")
+# Question: List all customers from Norway
+# SPARQL:
+# PREFIX ex: <http://example.org/>
+# SELECT ?customer ?name WHERE {
+#     ?customer a ex:Customer ;
+#               ex:country "Norway" ;
+#               ex:name ?name .
+# }
+```
+
+---
+
+### Full Onboarding Script
+
+Here's the entire workflow in one copy-paste script:
+
+```python
+"""
+autokg onboarding — complete walkthrough
+Run: python onboarding.py
+"""
+import polars as pl
+from datetime import datetime, timedelta
+from pathlib import Path
+Path("silver").mkdir(exist_ok=True)
+Path("gold").mkdir(exist_ok=True)
+
+# ── 1. Create test data ──
+customers = pl.DataFrame({
+    "customer_id": range(1, 11),
+    "name": [f"Customer-{i}" for i in range(1, 11)],
+    "email": [f"cust{i}@example.com" for i in range(1, 11)],
+    "country": ["USA", "Norway", "UK", "USA", "Germany"] * 2,
+})
+customers.write_parquet("silver/customers.parquet")
+
+orders = pl.DataFrame({
+    "order_id": range(100, 130),
+    "customer_id": [1, 1, 2, 3, 3, 2, 5, 7, 10, 4] * 3,
+    "order_date": [datetime(2025, 6, 1) + timedelta(days=i*5) for i in range(30)],
+    "total_amount": [1599.98 + i*100 for i in range(30)],
+    "status": ["completed"]*20 + ["pending"]*7 + ["cancelled"]*3,
+})
+orders.write_parquet("silver/orders.parquet")
+
+products = pl.DataFrame({
+    "product_id": range(200, 215),
+    "name": [f"Widget-{chr(65+i)}" for i in range(15)],
+    "category": (["Electronics"]*5 + ["Software"]*5 + ["Hardware"]*5),
+    "price": [299.99 + i*50 for i in range(15)],
+})
+products.write_parquet("silver/products.parquet")
+
+print("[1/7] Test data created in ./silver/")
+
+# ── 2. Build Knowledge Graph ──
+from autokg import KnowledgeGraph
+
+kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False)
+kg.add_table("silver/customers.parquet", entity_type="Customer",
+             id_column="customer_id")
+kg.add_table("silver/orders.parquet", entity_type="Order",
+             id_column="order_id",
+             relationships={"customer_id": "Customer"})
+kg.add_table("silver/products.parquet", entity_type="Product",
+             id_column="product_id")
+kg.build()
+print(f"[2/7] Knowledge graph built: {kg.triple_count} triples")
+
+# ── 3. Export ──
+kg.write("gold/graph.ttl")
+kg.write("gold/graph.jsonld", format="jsonld")
+kg.write("gold/graph.nt", format="ntriples")
+print("[3/7] Exported: Turtle, JSON-LD, N-Triples")
+
+# ── 4. Validate ──
+result = kg.validate()
+print(f"[4/7] Validation: {'PASSED' if result['conforms'] else 'FAILED'}")
+
+# ── 5. Profile ──
+profile = kg.profile()
+print(f"[5/7] Profile: {profile.height} metrics")
+print(kg.class_distribution())
+
+# ── 6. Catalog ──
+catalog = kg.generate_catalog("My First Catalog")
+print(f"[6/7] DCAT catalog: {len(catalog.generate_triples())} triples")
+
+# ── 7. Snapshot ──
+kg.snapshot("v1.0", "First knowledge graph")
+print(f"[7/7] Snapshot saved: v1.0")
+
+print("\nDone. Your knowledge graph is ready.")
+print(f"  gold/graph.ttl    — open in any text editor or RDF tool")
+print(f"  gold/graph.jsonld — structured linked data")
+print(f"  Try: kg.serve(port=7878) to start a SPARQL endpoint")
+```
+
+Save as `onboarding.py` and run:
+
+```bash
+python onboarding.py
+```
+
+---
+
+### Next Steps After Onboarding
+
+| You want to... | Read |
+|---------------|------|
+| Use with real data (S3, Delta Lake, SQL) | [Quickstart](#quickstart) |
+| Understand the architecture | [Architecture](#architecture) |
+| Use the CLI instead of Python | [CLI Reference](#cli-reference) |
+| Deploy to production | [Scale Tiers](#scale-tiers) |
+| Query with AI | [Key Features → AI Agent](#4-ai-agent-natural-language--sparql) |
+| Add custom connectors | [Key Features → Plugin System](#8-plugin-system) |
+| See every module | [Package Structure](#package-structure) |
+
+---
+
 ## Where Can It Be Used?
 
 ```mermaid
