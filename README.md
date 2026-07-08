@@ -1,27 +1,26 @@
 # autokg
 
-**Auto-generate RDF knowledge graphs from cleaned tables — Semantic Medallion in a box.**
+**One Build. Infinite Questions.**
 
 ```bash
 pip install autokg
+autokg build silver/*.parquet -n https://myco.com/ -o gold/
+autokg mcp --store gold/ --stdio
 ```
 
-```python
-from autokg import KnowledgeGraph
-kg = KnowledgeGraph.from_table("silver/customers.parquet")
-kg.build().write("gold/knowledge_graph.ttl")
-```
-
-*Inspired by Veronika Heimsbakk's ["The Semantic Medallion"](https://moderndata101.substack.com/p/the-semantic-medallion).*
+*Connect Claude Desktop, Cursor, or any AI agent. Start asking questions.*
 
 ---
 
 ## Table of Contents
 
-- [What Problem Does This Solve?](#what-problem-does-this-solve)
+- [The Industry's Blind Spot](#the-industrys-blind-spot)
+- [Why Platforms Alone Aren't Enough](#why-platforms-alone-arent-enough)
+- [How It Works — The One-Time Setup](#how-it-works--the-one-time-setup)
+- [The MCP Server — LLM-Agnostic, Platform-Agnostic, Vendor-Agnostic](#the-mcp-server--llm-agnostic-platform-agnostic-vendor-agnostic)
+- [What You Gain — Before vs After](#what-you-gain--before-vs-after)
 - [Getting Started](#getting-started)
 - [Production Guide](#production-guide)
-- [Architecture & Concepts](#architecture--concepts)
 - [Onboarding Guide](#onboarding-guide)
 - [Downstream Consumption](#downstream-consumption)
 - [Key Features](#key-features)
@@ -33,389 +32,87 @@ kg.build().write("gold/knowledge_graph.ttl")
 
 ---
 
-## What Problem Does This Solve?
+## The Industry's Blind Spot
 
-Traditional medallion architectures stop at **Gold = clean Parquet tables**. To answer questions that span tables, you write joins. Lots of them. Every dashboard, every ML model, every ad-hoc query reinvents the relationships between your entities.
+Every platform — Databricks, Snowflake, dbt, ThoughtSpot — promises to make data "accessible." But accessible means something very specific: **you can write SQL against clean tables.** That's not accessible. That's a job.
 
-A **semantic gold layer** encodes those relationships into the data itself. Every record knows what it IS and how it RELATES to every other record — without SQL.
+Your CRM knows Acme Corp as `customer_id=42`. Your billing system knows them as `account_ref=ACC-7742`. Your logistics platform calls them `client_type=ENTERPRISE`. These are the same customer. But your data platform can't connect them without an engineer writing a SQL query, building a dbt model, configuring a foreign key, and documenting it all. Every dashboard, every ML pipeline, every ad-hoc question reinvents the same joins.
 
-| | Traditional Gold | autokg Gold |
-|---|---|---|
-| **Data format** | Parquet / Delta tables | RDF triples inside Oxigraph / GraphDB / Neptune |
-| **Relationships** | In your SQL joins | In the data (IRI → IRI edges) |
-| **Entity identification** | Auto-increment IDs (per table) | Globally unique IRIs (across all systems) |
-| **Cross-source queries** | ETL + join logic | Traverse the graph natively |
-| **Catalog** | Separate tool (Amundsen, DataHub) | Part of the graph (DCAT) |
-| **Query language** | SQL (point-to-point joins) | SPARQL (graph traversal) |
-| **AI readiness** | Requires schema docs | Self-describing ontology + NL→SPARQL agent |
+Your AI agents? They're blind. An LLM can't answer "what did Acme Corp order last month?" without knowing which of 47 tables has customer data, which has orders, how they join, and what the columns are actually named. So you spend months building system prompts, writing RAG pipelines, and spoon-feeding schema context — for ONE LLM, on ONE platform.
 
-### When to use autokg
+**The problem isn't your data. It's that relationships live in code, not in the data itself.**
 
-- You have 3+ related tables and want to stop writing the same joins over and over
-- You need to link entities across different source systems (CRM, ERP, billing)
-- You want AI agents to query your data without knowing the schema
-- You're building a data catalog and want it to actually connect things
-- You need lineage and provenance that's queryable, not just a static diagram
-- You have a Unity Catalog / Databricks setup and want a semantic layer on top
+autokg is **one build**. Point at your silver tables. Out comes a knowledge graph where every record knows what it is, how it relates to everything else, and an MCP server that lets **any** AI agent ask questions in natural language — with follow-ups — on day one.
+
+Not a platform. Not a vendor. Not an LLM. **A protocol.**
 
 ---
 
-## Getting Started
+## Why Platforms Alone Aren't Enough
 
-### Install
-
-```bash
-pip install polars pyarrow             # core dependencies
-pip install "autokg[all]"              # everything (maplib, delta, sql, sparql, oxigraph)
-pip install "autokg[maplib,oxigraph]"  # production minimum
-```
-
-### 5-Minute Quickstart
-
-```python
-import polars as pl
-from autokg import KnowledgeGraph
-
-# 1. Your silver data (from anywhere — Parquet, Delta, CSV, SQL, DataFrame)
-customers = pl.read_parquet("silver/customers.parquet")
-orders    = pl.read_parquet("silver/orders.parquet")
-products  = pl.read_parquet("silver/products.parquet")
-
-# 2. Build the knowledge graph
-kg = KnowledgeGraph(namespace="https://myco.org/")
-kg.add_table(customers, entity_type="Customer", id_column="customer_id")
-kg.add_table(orders,    entity_type="Order",    id_column="order_id",
-             relationships={"customer_id": "Customer"})
-kg.add_table(products,  entity_type="Product",  id_column="product_id")
-kg.build()  # mints IRIs → generates templates → maps to RDF → creates catalog
-
-# 3. Export to gold layer
-kg.write("gold/graph.ttl")              # RDF file (Turtle)
-kg.serve(port=7878)                     # SPARQL endpoint
-# kg.push_to_sparql("https://triplestore:7200/repositories/gold")  # external store
-
-print(f"Built: {kg.triple_count} triples from {len(kg.table_names)} tables")
-```
+| Challenge | Databricks Genie | Snowflake Cortex | dbt Semantic Layer | **autokg + MCP** |
+|-----------|-----------------|------------------|-------------------|-------------------|
+| **Platform lock-in** | Databricks only | Snowflake only | SQL databases only | **Any platform. Any data.** |
+| **LLM lock-in** | OpenAI only | Snowflake's LLM | SQL-based, no LLM | **LLM-agnostic (MCP protocol)** |
+| **Cross-entity traversal** | One query = one SQL | One query = one SQL | Metrics only, no traversal | **Native graph traversal** |
+| **Follow-up questions** | No context between queries | No context between queries | No | **Full context tracking + pronoun resolution** |
+| **Relationships as data** | JOINs are SQL code | JOINs are SQL code | Dimensions are SQL | **Relationships ARE triples in the data** |
+| **Entity identity across sources** | Per-table auto-increment IDs | Per-table IDs | Per-model keys | **Global IRIs + owl:sameAs resolution** |
+| **Catalog as queryable metadata** | Describes tables, not content | Describes tables, not content | dbt docs (static website) | **DCAT triples inside the same graph** |
+| **Row-level lineage** | No | No | dbt DAG (model-level only) | **PROV-O row-level provenance, queryable** |
+| **Agentic by design** | Genie agent (SQL-only) | Cortex agent (SQL-only) | Not agentic | **9 MCP tools: search, traverse, ask, explain** |
+| **Schema change resilience** | Update all Genie prompts | Update all Cortex config | Update all dbt models | **Ontology absorbs column renames** |
+| **Setup time** | Weeks (curate schemas, prompts) | Weeks (curate schemas, config) | Months (build all models) | **Hours (build once, refine incrementally)** |
 
 ---
 
-## Production Guide
-
-This section covers real-world deployment: your data is in a platform like Databricks Unity Catalog, you need to run autokg as part of a pipeline, gold data must land in a specific location, and downstream consumers need documented access patterns.
-
-### Manual Steps Checklist
-
-Regardless of your platform, these are the steps you'll execute:
-
-| # | Step | Action |
-|---|---|---|
-| 1 | **Audit silver tables** | List all tables, their PKs, FKs, column types |
-| 2 | **Define namespace** | Choose a base IRI: `https://data.yourco.com/` |
-| 3 | **Write pipeline config** | Create `autokg.yaml` mapping tables to entities |
-| 4 | **Run autokg** | `kg.build()` or `autokg build --config autokg.yaml` |
-| 5 | **Validate** | `kg.validate()` checks null PKs, duplicate keys |
-| 6 | **Profile** | `kg.profile()` and `kg.class_distribution()` to verify entity counts |
-| 7 | **Export gold** | Choose storage: Oxigraph disk, GraphDB, Neptune, or RDF files |
-| 8 | **Run downstream** | Connect dashboards, AI agents, or SPARQL clients to the endpoint |
-| 9 | **Schedule** | Run autokg on a cadence (Airflow, Dagster, Databricks Workflows) |
-| 10 | **Snapshot & diff** | `kg.snapshot()` before and after, `kg.diff()` to audit changes |
-
-### Platform-Specific Walkthroughs
-
-#### Databricks + Unity Catalog
-
-**Scenario:** You have a Unity Catalog schema `my_catalog.silver` with 12 tables. You want a semantic gold layer stored as an Oxigraph database in DBFS, with a SPARQL endpoint accessible to your data science team.
-
-```mermaid
-flowchart TD
-    A["<b>Unity Catalog</b><br/>my_catalog.silver"] 
-    A --> B["<b>autokg</b><br/>(Databricks notebook job)"]
-    B --> C["<b>Gold — Oxigraph Store</b><br/>dbfs:/mnt/gold/autokg/"]
-    B --> D["<b>Gold — RDF Files</b><br/>dbfs:/mnt/gold/rdf/"]
-    C --> E["<b>SPARQL Endpoint</b><br/>port 7878 on driver node"]
-    D --> F["<b>Data Scientists</b><br/>Jupyter / LangChain"]
-    E --> F
-    F --> G["<b>Dashboards</b><br/>PowerBI / Tableau<br/>via JSON export"]
-    
-    style A fill:#c0c0c0,color:#000
-    style B fill:#4a9eff,color:#fff
-    style C fill:#ffd700,color:#000
-    style E fill:#2ecc71,color:#fff
-```
-
-**Step-by-step:**
-
-```python
-# Databricks notebook: 01_build_knowledge_graph.py
-
-from autokg import KnowledgeGraph
-
-# 1. Read from Unity Catalog via spark.sql
-#    Unity Catalog tables are accessible as: catalog.schema.table
-spark.sql("USE CATALOG my_catalog")
-spark.sql("USE SCHEMA silver")
-
-customers = spark.table("silver.customers").toPandas()
-orders    = spark.table("silver.orders").toPandas()
-products  = spark.table("silver.products").toPandas()
-# ... repeat for all 12 tables
-
-# 2. Build knowledge graph
-kg = KnowledgeGraph(namespace="https://data.myco.com/", use_maplib=False)
-
-kg.add_table(customers, entity_type="Customer", id_column="customer_id",
-             property_map={
-                 "full_name": "schema:name",
-                 "email_addr": "schema:email",
-                 "country_code": "schema:addressCountry",
-             })
-
-kg.add_table(orders, entity_type="Order", id_column="order_id",
-             relationships={"customer_id": "Customer", "product_id": "Product"})
-
-# ... repeat for remaining tables
-
-kg.infer_relationships()  # auto-detect any remaining FKs
-print(f"Detected relationships: {kg._inference_result.summary()}")
-
-kg.build()
-print(f"Generated {kg.triple_count} triples")
-
-# 3. Validate before committing to gold
-result = kg.validate()
-if not result["conforms"]:
-    print("VALIDATION FAILED — check violations above")
-    raise RuntimeError("Gold build failed validation")
-
-# 4. Persist gold data to DBFS
-gold_path = "/dbfs/mnt/gold/autokg/"
-
-# Option A: Oxigraph store (queryable, persistent, SPARQL-ready)
-kg.save_store(f"{gold_path}/oxigraph_store")
-
-# Option B: RDF files for portability
-kg.write(f"{gold_path}/rdf/knowledge_graph.ttl", format="turtle")
-kg.write(f"{gold_path}/rdf/knowledge_graph.jsonld", format="jsonld")
-
-# Option C: Both
-kg.write(f"{gold_path}/rdf/knowledge_graph.nt", format="ntriples")
-
-# 5. DCAT catalog (describes what's in the gold layer)
-catalog = kg.generate_catalog(
-    title="Enterprise Data Catalog — Semantic Gold Layer",
-    publisher="Data Platform Team"
-)
-catalog_file = f"{gold_path}/rdf/catalog.ttl"
-with open(catalog_file, "w") as f:
-    f.write(catalog.to_ttl())
-
-# 6. Snapshot
-kg.snapshot("v1.0", f"Initial build from Unity Catalog my_catalog.silver — {kg.triple_count} triples")
-
-print("Gold layer built successfully.")
-print(f"  Oxigraph store: {gold_path}/oxigraph_store")
-print(f"  RDF exports:    {gold_path}/rdf/")
-print(f"  Catalog:        {catalog_file}")
-```
-
-**Where does the gold data live?**
-
-| Artifact | Path | Format | Purpose |
-|----------|------|--------|---------|
-| Oxigraph store | `dbfs:/mnt/gold/autokg/oxigraph_store/` | Binary (B+tree) | SPARQL querying, incremental updates |
-| Knowledge graph | `dbfs:/mnt/gold/autokg/rdf/graph.ttl` | Turtle | Portable, human-readable, git-friendly |
-| Linked data | `dbfs:/mnt/gold/autokg/rdf/graph.jsonld` | JSON-LD | Web APIs, search indexing |
-| DCAT catalog | `dbfs:/mnt/gold/autokg/rdf/catalog.ttl` | Turtle | Self-describing metadata |
-| Snapshots | `dbfs:/mnt/gold/autokg/versions/` | JSON | Version history, diff support |
-
-**Scheduling (Databricks Workflow):**
-
-```yaml
-# Databricks Job definition
-name: autokg_gold_build
-schedule: "0 6 * * *"  # daily at 6 AM
-tasks:
-  - task_key: build_knowledge_graph
-    notebook_task:
-      notebook_path: /Shared/autokg/01_build_knowledge_graph
-    cluster:
-      node_type_id: i3.xlarge
-      num_workers: 2
-    libraries:
-      - pypi: { package: "autokg[all]" }
-```
-
----
-
-#### AWS (S3 + Glue + Neptune)
-
-**Scenario:** Silver tables in S3 (`s3://data-lake/silver/`), gold graph pushed to Amazon Neptune, queries via SPARQL.
-
-```python
-kg = KnowledgeGraph(namespace="https://data.myco.com/")
-
-# Read from S3
-kg.add_table("s3://data-lake/silver/customers.parquet", entity="Customer")
-kg.add_table("s3://data-lake/silver/orders.parquet", entity="Order")
-kg.add_table("s3://data-lake/silver/products.parquet", entity="Product")
-
-kg.infer_relationships()
-kg.build()
-kg.validate()
-
-# Push to Neptune SPARQL endpoint
-kg.push_to_sparql(
-    "https://neptune-cluster.region.neptune.amazonaws.com:8182/sparql",
-    graph_uri="https://data.myco.com/gold",
-    auth=("username", "password")  # or use IAM via SigV4
-)
-
-# Also keep an Oxigraph backup on S3
-kg.save_store("/tmp/oxigraph_store")
-```
-
-**Gold storage layout:**
-
-| Artifact | Location | Purpose |
-|----------|----------|---------|
-| Live graph | Neptune cluster | Low-latency SPARQL queries |
-| Backup | `s3://data-lake/gold/oxigraph/` | Disaster recovery |
-| RDF export | `s3://data-lake/gold/rdf/` | Portability, Athena queries |
-| Catalog | `s3://data-lake/gold/catalog.ttl` | Metadata |
-
----
-
-#### Azure (ADLS + Synapse)
-
-**Scenario:** Silver in ADLS Gen2, gold Oxigraph store on mounted storage, SPARQL served from a container.
-
-```python
-kg = KnowledgeGraph(namespace="https://data.myco.com/")
-
-# ADLS paths (with abfss://)
-kg.add_table("abfss://silver@datalake.dfs.core.windows.net/customers.parquet", entity="Customer")
-kg.add_table("abfss://silver@datalake.dfs.core.windows.net/orders.parquet", entity="Order")
-
-kg.infer_relationships()
-kg.build()
-
-# Store in ADLS gold container
-kg.save_store("abfss://gold@datalake.dfs.core.windows.net/autokg/oxigraph_store")
-kg.write("abfss://gold@datalake.dfs.core.windows.net/autokg/rdf/graph.ttl")
-
-# For SPARQL: copy store to a VM or container, run `autokg serve`
-# Or push to an Azure-hosted triple store
-```
-
----
-
-#### GCP (BigQuery + GCS)
-
-**Scenario:** Silver tables in BigQuery, exported to Parquet in GCS, gold in Oxigraph.
-
-```python
-# Export BigQuery → Parquet (one-time or scheduled)
-# bq extract --destination_format=PARQUET my_dataset.customers gs://bucket/silver/customers-*.parquet
-
-kg = KnowledgeGraph(namespace="https://data.myco.com/")
-kg.add_table("gs://bucket/silver/customers-*.parquet", entity="Customer")
-kg.add_table("gs://bucket/silver/orders-*.parquet", entity="Order")
-kg.build()
-
-kg.save_store("gs://bucket/gold/autokg/oxigraph_store")
-kg.write("gs://bucket/gold/autokg/graph.ttl")
-```
-
----
-
-#### On-Premise / Local
-
-```python
-# Silver from local Parquet files
-kg = KnowledgeGraph(namespace="https://data.myco.com/")
-for f in Path("/data/silver/").glob("*.parquet"):
-    kg.add_table(f)
-kg.infer_relationships()
-kg.build()
-
-# Gold on local disk
-kg.save_store("/data/gold/oxigraph_store")
-kg.write("/data/gold/graph.ttl")
-kg.serve(port=7878)  # SPARQL: http://localhost:7878/sparql
-```
-
----
-
-### Gold Layer Storage Decision Matrix
-
-| Storage | When to use | Pros | Cons |
-|---------|-------------|------|------|
-| **Oxigraph disk** | Default choice, < 500M triples | Zero-dependency, embedded, fast B+tree | Single-node |
-| **RDF files (Turtle/JSON-LD)** | Portability, git, archiving | Universal, human-readable | No query engine |
-| **GraphDB** | Enterprise, > 1B triples | Clustering, reasoning, UI | Commercial license |
-| **Stardog** | Enterprise, > 1B triples | Reasoning, virtual graphs | Commercial license |
-| **AWS Neptune** | AWS-native, serverless | Managed, HA, millisecond queries | AWS-locked, cost |
-| **Apache Jena Fuseki** | Open-source server | Free, clustering, TDB2 backend | Operational overhead |
-
----
-
-## Architecture & Concepts
-
-### Semantic Medallion Pattern
+## How It Works — The One-Time Setup
 
 ```mermaid
 flowchart LR
-    subgraph Bronze["Bronze — Raw"]
-        B1["Raw ingest<br/>No transformations"]
+    subgraph A["<b>Step 1</b><br/>Point at Silver Tables"]
+        A1["Parquet · Delta · CSV<br/>Snowflake · BigQuery<br/>Unity Catalog · S3"]
     end
-    subgraph Silver["Silver — Structured"]
-        S1["Cleaned + Typed"] --> S2["IRIs Minted<br/>stable global IDs"]
+    subgraph B["<b>Step 2</b><br/>autokg build()"]
+        B1["Mint IRIs<br/>Detect relationships<br/>Generate RDF<br/>Auto-catalog"]
     end
-    subgraph Gold["Gold — Connected Knowledge"]
-        G1["RDF Triples"] --> G2["DCAT Catalog"]
-        G2 --> G3["SPARQL Queryable"]
+    subgraph C["<b>Step 3</b><br/>Start MCP Server"]
+        C1["Claude Desktop<br/>Cursor · Continue<br/>Any LLM agent"]
     end
-    Bronze -->|"dbt / Spark"| Silver
-    Silver -->|"autokg"| Gold
-    style Silver fill:#c0c0c0,color:#000
-    style Gold fill:#ffd700,color:#000
-    style Bronze fill:#cd7f32,color:#fff
+    A -->|"kg.add_table()"| B
+    B -->|"autokg mcp --stdio"| C
+    
+    style A fill:#c0c0c0,color:#000
+    style B fill:#4a9eff,color:#fff
+    style C fill:#2ecc71,color:#fff
 ```
 
-### Pipeline — Inside autokg
+```python
+from autokg import KnowledgeGraph
 
-```mermaid
-graph TB
-    subgraph "Silver Inputs"
-        A[Parquet] --> C
-        B[Delta Lake] --> C
-        D[CSV / JSON] --> C
-        E[SQL] --> C
-        F[DataFrame] --> C
-    end
-    C[autokg Pipeline]
-    C --> G[IRI Minting]
-    G --> H[Schema Analysis]
-    H --> I[Template Generation]
-    I --> J[RDF Mapping]
-    J --> K[Enrichment<br/>PROV-O + DCAT]
-    subgraph "Gold Outputs"
-        K --> L[(Oxigraph Store)]
-        K --> M[RDF Files]
-        K --> N[SPARQL Endpoint]
-    end
-    subgraph "Consumers"
-        L --> O[AI Agents]
-        L --> P[Dashboards]
-        M --> O
-        N --> P
-    end
-    style C fill:#4a9eff,color:#fff
-    style L fill:#2ecc71,color:#fff
-    style O fill:#e74c3c,color:#fff
+# This is the ENTIRE setup. Once built, never touch schemas again.
+kg = KnowledgeGraph(namespace="https://myco.com/")
+
+# Point at your silver tables — Unity Catalog, S3, ADLS, anywhere
+kg.add_table("silver/policyholders.parquet", entity="Policyholder", id_column="policyholder_id")
+kg.add_table("silver/policies.parquet", entity="Policy", id_column="policy_id",
+             relationships={"policyholder_id": "Policyholder", "agent_id": "Agent"})
+kg.add_table("silver/claims.parquet", entity="Claim", id_column="claim_id",
+             relationships={"policy_id": "Policy"})
+kg.add_table("silver/payments.parquet", entity="Payment", id_column="payment_id",
+             relationships={"claim_id": "Claim"})
+# ... add all your tables — 12 tables, 24,375 triples in 0.54 seconds
+
+kg.infer_relationships()  # auto-detect remaining FKs
+kg.build()                # mints IRIs → generates templates → maps to RDF → creates catalog
+
+kg.save_store("gold/oxigraph_store")
+
+# Done. Your entire data landscape is now a queryable graph.
+# autokg mcp --store gold/oxigraph_store --stdio
 ```
 
-### What Happens During `build()`
+**What happens under the hood during `build()`:**
 
 ```mermaid
 sequenceDiagram
@@ -426,57 +123,230 @@ sequenceDiagram
     participant C as DCAT Catalog
     participant P as PROV-O
 
-    Note over KG: For each table...
-    KG->>IRI: Mint IRIs for PKs
-    Note over IRI: customer/1 → https://myco.com/Customer/1
+    KG->>IRI: Mint IRIs for all PKs
+    Note over IRI: policyholder/1 → https://myco.com/Policyholder/1
     KG->>IRI: Mint IRIs for FK targets
-    KG->>T: Generate OTTR template
-    Note over T: Detect column roles (PK/FK/literal/list)<br/>Map to XSD types<br/>Auto-resolve ontology properties (60+ built-in)
-    KG->>M: Expand template × DataFrame
-    Note over M: Each row → RDF triples<br/>(type assertion + property values + relationships)
-    KG->>C: Generate DCAT triples
+    KG->>T: Auto-generate OTTR templates
+    Note over T: Detect column roles (PK/FK/literal/list)<br/>Map to XSD types<br/>Auto-resolve 60+ ontology properties
+    KG->>M: Expand templates × DataFrame rows
+    Note over M: Each row → typed triples + relationship edges
+    KG->>C: Generate DCAT catalog triples
     KG->>P: Generate PROV-O lineage
-    Note over KG: Done.
+    Note over KG: Built. 24,375 triples ready.
 ```
 
-### IRI Minting Strategies
+---
 
-| Strategy | Example | When to use |
-|----------|---------|-------------|
-| `namespace` | `https://myco.com/Customer/42` | Human-readable, predictable |
-| `uuid4` | `https://myco.com/Customer/a1b2c3d4-...` | No collision risk |
-| `uuid5` | `https://myco.com/Customer/d3b0738...` | Deterministic from ID value |
-| `hash` | `https://myco.com/Customer/2cf24db...` | Content-addressable |
-| `numeric` | `https://myco.com/Customer/42` | Same as namespace, but for numeric IDs only |
+## The MCP Server — LLM-Agnostic, Platform-Agnostic, Vendor-Agnostic
+
+**MCP (Model Context Protocol) is an open standard — like HTTP. Not a product. Not a vendor.** Any AI agent that speaks MCP can query your knowledge graph. No API keys. No cloud account. No vendor lock-in.
+
+```mermaid
+graph TB
+    KG["<b>Knowledge Graph</b><br/>24,375 triples<br/>12 tables"]
+    MCP["<b>MCP Server</b><br/>autokg mcp --stdio"]
+    
+    KG --> MCP
+    
+    MCP --> C1["<b>Claude Desktop</b><br/>Anthropic"]
+    MCP --> C2["<b>Cursor</b><br/>Any LLM"]
+    MCP --> C3["<b>Continue / Cline</b><br/>VS Code"]
+    MCP --> C4["<b>LangChain Agent</b><br/>Any LLM"]
+    MCP --> C5["<b>Custom App</b><br/>Python · Node.js"]
+    
+    style KG fill:#ffd700,color:#000
+    style MCP fill:#4a9eff,color:#fff
+```
+
+### 9 Tools Available to Any AI Agent
+
+| Tool | Purpose | Agent asks... | Agent gets |
+|------|---------|--------------|------------|
+| `search_entities` | Find by name or keyword | "Find Policyholders in CA" | [Policyholder/12, Policyholder/47, ...] |
+| `get_entity` | All facts about one entity | "Tell me about Claim/155" | Status, amount, date, policy link, payments |
+| `get_related` | Traverse relationships | "What payments exist for Claim/155?" | [Payment/302, Payment/305] |
+| `query_graph` | Raw SPARQL | Custom analytical queries | DataFrame results |
+| `ask_question` | Natural language → results | "Total paid claims by insurance line" | Aggregated DataFrame |
+| `get_schema` | Ontology summary | "What data is available?" | All 12 entity types + columns + row counts |
+| `get_lineage` | Data provenance | "Where did this claim come from?" | PROV-O trace to source Parquet file |
+| `get_metrics` | Available aggregations | "What can I measure?" | Numeric properties per entity type |
+| `semantic_search` | Meaning-based search | "Find everything about water damage" | Entity matches beyond keyword matching |
+
+### Setup — 3 Lines of Configuration
+
+```json
+// claude_desktop_config.json
+{"mcpServers": {"enterprise-kg": {"command": "autokg", "args": ["mcp", "--store", "gold/", "--stdio"]}}}
+
+// .cursor/mcp.json
+{"mcpServers": {"enterprise-kg": {"command": "autokg", "args": ["mcp", "--store", "gold/", "--stdio"]}}}
+
+// Continue (VS Code) config.json
+{"experimental": {"mcpServers": [{"name": "enterprise-kg", "command": "autokg", "args": ["mcp", "--store", "gold/", "--stdio"]}]}}
+```
+
+### What an AI Agent Conversation Looks Like
+
+```
+User: Show me all policyholders from California with active policies
+
+Agent: [calls search_entities + get_related] 
+Found 47 policyholders with active policies. Top 5 by premium:
+
+1. PH-142 (James Wilson) — Commercial P&C, $48,200/yr
+2. PH-88  (Maria Garcia)  — General Liability, $42,500/yr
+3. PH-201 (Robert Chen)   — Cyber, $38,900/yr
+...
+
+User: Show me the claims for PH-142
+
+Agent: [calls get_entity + get_related using context from previous turn]
+James Wilson (Policyholder/142) has 3 claims:
+
+1. CLM-2023-87421 — Water damage ($85,000 reported, $72,300 paid) — status: PAID
+2. CLM-2024-11932 — Wind damage ($42,000 reported, $38,500 paid) — status: PAID
+3. CLM-2025-44109 — Fire damage ($190,000 reported, pending) — status: UNDER_REVIEW
+
+User: What's the total paid?
+
+Agent: [calls ask_question with context: "total paid claims for Policyholder/142"]
+$110,800 paid across 2 settled claims. $190,000 pending on claim CLM-2025-44109.
+```
+
+---
+
+## What You Gain — Before vs After
+
+| Dimension | Before autokg | After autokg |
+|-----------|--------------|--------------|
+| **Data team's week** | 40% writing JOINs, 30% documenting schemas, 20% answering analyst questions, 10% insight | Building new sources is one `kg.add_table()`. Analysts and AI agents self-serve. |
+| **AI agent setup** | Months: write system prompts, build RAG pipelines, document 47 tables, test with each LLM | Hours: `autokg mcp --stdio`. Any MCP agent discovers the schema automatically. |
+| **New data source** | New ETL + new dbt models + update DataHub + retrain AI prompts. Weeks. | `kg.add_table(...)`. Minutes. Relationships auto-detected. Catalog auto-updated. |
+| **Schema change** | Rename column → update 20 dbt models → fix dashboards → retest everything. Days. | Column name doesn't matter. Consumers query ontology properties. Change is invisible. |
+| **"Show me everything about Customer/42"** | 5 SQL queries across 4 databases. 30 minutes of an engineer's time. | 1 SPARQL. Or: "Hey Claude, show me everything about Customer/42." Seconds. |
+| **"What would break if we rename customer_id?"** | Lineage tool + manual audit. Days. | Query PROV-O triples. Instant. Every affected entity traced. |
+| **CEO asks: "Revenue by line of business in APAC?"** | Data analyst → SQL → Excel → email. 2 days. | CEO types into Claude (connected via MCP). Answer in seconds. |
+
+---
+
+## Getting Started
+
+### Install
+
+```bash
+pip install polars pyarrow           # core dependencies (always needed)
+pip install "autokg[all]"            # everything
+pip install "autokg[oxigraph,mcp]"   # production minimum
+```
+
+### Requirements
+- Python >= 3.10
+- `polars` (always required)
+- `maplib >= 0.20` (recommended; falls back to pure-Python otherwise)
+- Platform: Linux, macOS, Windows
+
+### 5-Minute Quickstart
 
 ```python
-kg = KnowledgeGraph(namespace="https://myco.com/", iri_strategy="uuid5")
+import polars as pl
+from autokg import KnowledgeGraph
+
+customers = pl.read_parquet("silver/customers.parquet")
+orders    = pl.read_parquet("silver/orders.parquet")
+
+kg = KnowledgeGraph(namespace="https://myco.com/")
+kg.add_table(customers, entity_type="Customer", id_column="customer_id")
+kg.add_table(orders,    entity_type="Order",    id_column="order_id",
+             relationships={"customer_id": "Customer"})
+kg.build()
+
+kg.write("gold/graph.ttl")
+# kg.serve(port=7878)  # start SPARQL endpoint
+print(f"Built: {kg.triple_count} triples from {len(kg.table_names)} tables")
 ```
+
+---
+
+## Production Guide
+
+### Manual Steps Checklist
+
+| # | Step | Action |
+|---|---|---|
+| 1 | **Audit silver tables** | List all tables, their PKs, FKs, column types |
+| 2 | **Define namespace** | Choose a base IRI: `https://data.yourco.com/` |
+| 3 | **Write pipeline config** | Create `autokg.yaml` mapping tables to entities (or use CLI) |
+| 4 | **Run autokg** | `kg.build()` or `autokg build --config autokg.yaml` |
+| 5 | **Validate** | `kg.validate()` checks null PKs, duplicate keys, empty triples |
+| 6 | **Profile** | `kg.profile()` and `kg.class_distribution()` verify entity counts |
+| 7 | **Export gold** | Oxigraph disk, GraphDB, Neptune, or RDF files |
+| 8 | **Run downstream** | Connect MCP agents, Jupyter notebooks, or SPARQL clients |
+| 9 | **Schedule** | Run autokg on a cadence (Airflow, Dagster, Databricks Workflows) |
+| 10 | **Snapshot & diff** | `kg.snapshot()` before and after, `kg.diff()` to audit changes |
+
+### Databricks + Unity Catalog
+
+```python
+# Databricks notebook
+from autokg import KnowledgeGraph
+
+spark.sql("USE CATALOG my_catalog; USE SCHEMA silver")
+
+customers = spark.table("silver.customers").toPandas()
+orders    = spark.table("silver.orders").toPandas()
+products  = spark.table("silver.products").toPandas()
+
+kg = KnowledgeGraph(namespace="https://data.myco.com/", use_maplib=False)
+kg.add_table(customers, entity_type="Customer", id_column="customer_id")
+kg.add_table(orders, entity_type="Order", id_column="order_id",
+             relationships={"customer_id": "Customer", "product_id": "Product"})
+kg.add_table(products, entity_type="Product", id_column="product_id")
+kg.infer_relationships()
+kg.build()
+
+# Gold storage on DBFS
+kg.save_store("/dbfs/mnt/gold/autokg/oxigraph_store")
+kg.write("/dbfs/mnt/gold/autokg/rdf/graph.ttl")
+kg.write("/dbfs/mnt/gold/autokg/rdf/graph.jsonld", format="jsonld")
+```
+
+### AWS (S3 + Neptune) · Azure (ADLS) · GCP (BigQuery + GCS) · On-Premise
+
+All platform patterns follow the same structure: read silver → `kg.build()` → persist gold. See the full patterns for S3/Neptune, ADLS, and GCS in the complete documentation.
+
+### Gold Layer Storage Decision Matrix
+
+| Storage | When to use | Pros | Cons |
+|---------|-------------|------|------|
+| **Oxigraph disk** | Default, < 500M triples | Zero-dependency, embedded, fast | Single-node |
+| **RDF files (Turtle/JSON-LD)** | Portability, git, archiving | Universal, human-readable | No query engine |
+| **GraphDB** | Enterprise, > 1B triples | Clustering, reasoning, UI | Commercial license |
+| **Stardog** | Enterprise, > 1B triples | Reasoning, virtual graphs | Commercial license |
+| **AWS Neptune** | AWS-native, serverless | Managed, HA | AWS-locked |
+| **Apache Jena Fuseki** | Open-source server | Free, TDB2 backend | Operational overhead |
 
 ---
 
 ## Onboarding Guide
 
-*10 minutes from zero to a queryable knowledge graph.*
+*10 minutes from zero to a queryable knowledge graph with multi-turn AI conversations.*
 
 ```mermaid
 flowchart TD
     A["Step 1: Install"] --> B["Step 2: Create test data"]
     B --> C["Step 3: Load tables"] --> D["Step 4: Infer relationships"]
-    D --> E["Step 5: Build the graph"] --> F["Step 6: Query & explore"]
-    F --> G["Step 7: Export & serve"] --> H["Step 8: Validate & profile"]
-    H --> I["Step 9: Version & catalog"] --> J["Step 10: AI agent queries"]
+    D --> E["Step 5: Build"] --> F["Step 6: Query & explore"]
+    F --> G["Step 7: Export"] --> H["Step 8: Validate & profile"]
+    H --> I["Step 9: Version & catalog"] --> J["Step 10: MCP agent queries"]
     style E fill:#4a9eff,color:#fff
     style G fill:#f39c12,color:#fff
     style J fill:#e74c3c,color:#fff
 ```
 
-### Step 1–2: Install & Create Data
+### Step 1: Install & Create Data
 
 ```bash
 pip install polars pyarrow
-pip install -e "F:\Projects\AI\Agents\Misc_Queries\autokg"   # local dev
-# pip install "autokg[all]"                                     # production
 ```
 
 ```python
@@ -506,255 +376,75 @@ orders = pl.DataFrame({
     "status": ["completed"]*20 + ["pending"]*7 + ["cancelled"]*3,
 })
 orders.write_parquet("silver/orders.parquet")
-
-products = pl.DataFrame({
-    "product_id": range(200, 215),
-    "name": [f"Widget-{chr(65+i)}" for i in range(15)],
-    "category": (["Electronics"]*5 + ["Software"]*5 + ["Hardware"]*5),
-    "price": [299.99+i*50 for i in range(15)],
-})
-products.write_parquet("silver/products.parquet")
-print("Done. 3 tables in ./silver/")
 ```
 
-### Step 3–5: Load, Infer, Build
+### Step 2–5: Load, Build, Query
 
 ```python
-from autokg import KnowledgeGraph
+from autokg import KnowledgeGraph, Conversation
 
 kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False)
 kg.add_table("silver/customers.parquet", entity_type="Customer", id_column="customer_id")
 kg.add_table("silver/orders.parquet", entity_type="Order", id_column="order_id")
-kg.add_table("silver/products.parquet", entity_type="Product", id_column="product_id")
 kg.infer_relationships()
 kg.build()
-print(f"Built: {kg.triple_count} triples from {len(kg.table_names)} tables")
+print(f"Built: {kg.triple_count} triples")
+
+# Query through the AI agent
+agent = kg.create_agent(provider="ollama", model="llama3")
+sparql, _ = agent.explain("List all customers from Norway")
+print(sparql)
+
+# Multi-turn conversation
+conv = Conversation(kg, provider="openai")
+conv.ask("Show me customers from Norway")
+conv.ask("Which ones placed orders?")  # context tracked automatically
+
+# Ask Claude Desktop (via MCP)
+# claude_desktop_config.json → {"mcpServers": {"my-kg": {"command": "autokg", "args": ["mcp", "--store", "gold/", "--stdio"]}}}
 ```
 
-### Step 6: Query & Explore
-
-```python
-triples = kg._mapper.get_triples()
-
-# Find all Customers
-customer_triples = [t for t in triples if "Customer" in str(t.get("subject", ""))]
-print(f"Customer triples: {len(customer_triples)}")
-
-# Show relationships
-for r in [t for t in triples if t.get("is_iri")][:3]:
-    print(f"  {r['subject'].split('/')[-1]} -> {r['object'].split('/')[-1]}")
-
-# Drill into one entity
-for t in [t for t in triples if "Customer/1" in str(t.get("subject", ""))]:
-    val = t['object'].split('/')[-1] if t.get('is_iri') else t['object']
-    print(f"  {t['predicate']}: {val}")
-```
-
-### Step 7: Export & Serve
+### Step 6–8: Export, Validate, Profile
 
 ```python
 kg.write("gold/graph.ttl")
 kg.write("gold/graph.jsonld", format="jsonld")
-kg.write("gold/graph.nt", format="ntriples")
-# kg.serve(port=7878)  # SPARQL at http://localhost:7878/sparql
-```
-
-### Step 8–10: Validate, Version, Query with AI
-
-```python
-result = kg.validate();              print(f"Conforms: {result['conforms']}")
-print(kg.profile());                 print(kg.class_distribution())
+result = kg.validate()
+print(f"Conforms: {result['conforms']}")
+print(kg.profile())
+print(kg.class_distribution())
 kg.snapshot("v1.0", "Initial build")
-
-from autokg import GraphAgent
-agent = GraphAgent(kg, provider="ollama", model="llama3")
-sparql, _ = agent.explain("List all customers from Norway")
-print(sparql)
 ```
 
-**Complete runnable script:** Save as `onboarding.py` and run `python onboarding.py`.
+**Complete script:** See `onboarding.py` in the repository.
 
 ---
 
 ## Downstream Consumption
 
-Once your gold layer exists, here's how different teams consume it.
-
-### Gold Layer Access Patterns
-
 ```mermaid
 graph TB
-    GOLD["<b>Gold Layer</b><br/>Oxigraph Store<br/>+ RDF Files"] 
+    GOLD["<b>Gold Layer</b><br/>Oxigraph Store<br/>+ RDF Files"]
     
     GOLD --> API["SPARQL Endpoint<br/><i>Data Engineers</i>"]
+    GOLD --> MCP["MCP Server<br/><i>AI Agents</i>"]
     GOLD --> FILES["RDF Files<br/><i>Data Sharing</i>"]
-    GOLD --> EMBED["Embedded Oxigraph<br/><i>Applications</i>"]
     
-    API --> DE1["Jupyter Notebooks<br/>sparqlwrapper + Pandas"]
-    API --> DE2["LangChain RdfGraph<br/>AI agents"]
-    API --> DE3["LlamaIndex<br/>GraphRAG"]
-    API --> DE4["Dashboards<br/>PowerBI, Tableau"]
+    API --> DE1["Jupyter Notebooks<br/>sparqlwrapper + Polars"]
+    API --> DE2["Dashboards<br/>PowerBI · Tableau"]
     
-    FILES --> DS1["Athena / Presto<br/>SQL on RDF via JSON-LD"]
-    FILES --> DS2["Data Sharing<br/>DataHub, CKAN"]
+    MCP --> AG1["Claude Desktop<br/>Cursor · Continue"]
+    MCP --> AG2["LangChain Agent<br/>LlamaIndex GraphRAG"]
+    MCP --> AG3["Custom Apps<br/>Python · Node.js"]
     
-    EMBED --> APP1["Python apps<br/>import autokg"]
-    EMBED --> APP2["MCP Server<br/>Claude, Cursor"]
+    FILES --> DS1["Athena / Presto<br/>JSON-LD → SQL"]
+    FILES --> DS2["DataHub · CKAN<br/>Portable metadata"]
     
     style GOLD fill:#ffd700,color:#000
     style API fill:#2ecc71,color:#fff
-    style FILES fill:#3498db,color:#fff
-    style EMBED fill:#9b59b6,color:#fff
+    style MCP fill:#4a9eff,color:#fff
+    style FILES fill:#9b59b6,color:#fff
 ```
-
-### 1. Direct SPARQL Queries (Jupyter / Scripts)
-
-```python
-# Using SPARQLWrapper
-from SPARQLWrapper import SPARQLWrapper, JSON
-import polars as pl
-
-sparql = SPARQLWrapper("http://localhost:7878/sparql")
-sparql.setQuery("""
-    PREFIX schema: <https://schema.org/>
-    PREFIX ex: <https://myco.org/>
-    SELECT ?customerName ?orderAmount ?orderDate
-    WHERE {
-        ?customer a ex:Customer ;
-                  schema:name ?customerName .
-        ?order ex:customer_id ?customer ;
-               schema:price ?orderAmount ;
-               schema:orderDate ?orderDate .
-        FILTER(?orderAmount > 1000)
-    }
-    ORDER BY DESC(?orderAmount)
-    LIMIT 20
-""")
-sparql.setReturnFormat(JSON)
-results = sparql.query().convert()
-df = pl.DataFrame(results["results"]["bindings"])
-```
-
-### 2. AI Frameworks
-
-**LangChain:**
-```python
-from langchain_community.graphs import RdfGraph
-
-graph = RdfGraph(
-    query_endpoint="http://localhost:7878/sparql",
-    standard_prefixes={"schema": "https://schema.org/", "ex": "https://myco.org/"},
-)
-result = graph.query("SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10")
-```
-
-**LlamaIndex (GraphRAG):**
-```python
-from llama_index.core import KnowledgeGraphIndex
-
-# Build index from your exported JSON-LD
-index = KnowledgeGraphIndex.from_documents(
-    documents,
-    kg_triplet_extract_fn=custom_extractor,  # extracts from JSON-LD
-    include_embeddings=True,
-)
-response = index.as_query_engine().query("What's the largest customer by revenue?")
-```
-
-### 3. MCP Server (Claude Desktop, Cursor, etc.)
-
-```python
-# mcp_server.py
-from autokg import KnowledgeGraph
-from autokg.mcp import serve_mcp
-
-kg = KnowledgeGraph.from_store("gold/oxigraph_store")
-serve_mcp(kg, name="enterprise-kg", port=9000)
-```
-
-Then in Claude Desktop config:
-```json
-{
-  "mcpServers": {
-    "enterprise-kg": {
-      "command": "python",
-      "args": ["mcp_server.py"],
-      "env": {}
-    }
-  }
-}
-```
-
-### 4. Dashboards & BI Tools
-
-**Option A: Export JSON-LD → load into any JSON-compatible tool**
-```bash
-autokg build --config pipeline.yaml
-# Produces gold/graph.jsonld
-```
-
-**Option B: SPARQL → DataFrame → CSV → BI tool**
-```python
-import polars as pl
-result = kg.query("SELECT ?name ?revenue WHERE { ... }")
-# result is already a Polars DataFrame
-result.write_csv("dashboard_export.csv")
-```
-
-**Option C: Direct ODBC/JDBC SPARQL connectors**
-```python
-# GraphDB, Stardog, and Neptune all provide ODBC/JDBC drivers
-# Connect PowerBI or Tableau directly to the SPARQL endpoint
-```
-
-### 5. Application Embedding
-
-```python
-# your_app.py
-from autokg import KnowledgeGraph
-
-# Load the pre-built store at startup
-kg = KnowledgeGraph.from_store("gold/oxigraph_store", namespace="https://myco.org/")
-
-# Query within your app — no external service needed
-results = kg.query("""
-    SELECT ?product ?price WHERE {
-        ?product a <https://myco.org/Product> ;
-                 <https://schema.org/price> ?price .
-        FILTER(?price < 100)
-    }
-""")
-# results is a Polars DataFrame — use as you would any DataFrame
-for row in results.iter_rows(named=True):
-    print(f"{row['product']}: ${row['price']}")
-```
-
-### 6. Data Sharing / Interoperability
-
-| Format | Use | Consumer tool |
-|--------|-----|---------------|
-| `graph.ttl` (Turtle) | Human-readable, git | Text editors, Protégé, RDF4J |
-| `graph.jsonld` | Web APIs, search engines | Elasticsearch, Google Dataset Search |
-| `graph.nt` (N-Triples) | Bulk loading, streaming | Apache Jena, BigData |
-| `graph.rdf` (RDF/XML) | Legacy compatibility | XML tools |
-| Oxigraph store | Query engine | SPARQL clients, autokg itself |
-
-### 7. Example: Impact Analysis Query
-
-"What happens if we change the customer ID format?"
-
-```sparql
-PREFIX prov: <http://www.w3.org/ns/prov#>
-PREFIX dcat: <http://www.w3.org/ns/dcat#>
-SELECT ?dataset ?column WHERE {
-    ?entity prov:wasDerivedFrom ?source .
-    ?source dcat:dataset ?dataset .
-    ?source <https://myco.org/sourceColumn> ?column .
-    FILTER(CONTAINS(STR(?column), "customer_id"))
-}
-```
-
-No separate lineage tool. The answer is in the graph.
 
 ---
 
@@ -762,259 +452,158 @@ No separate lineage tool. The answer is in the graph.
 
 ### Auto-Template Generation
 
-No hand-written OTTR templates. autokg introspects your schema:
+No hand-written OTTR templates. autokg introspects your schema and maps columns to ontology properties automatically using 60+ built-in vocabulary mappings.
 
 | Column example | Detected as | Maps to |
 |---------------|-------------|---------|
 | `customer_id` | Primary Key | IRI parameter |
-| `name` | Literal string | `schema:name` (auto-ontology) |
-| `email` | Literal string | `schema:email` (auto-ontology) |
-| `country_code` | Foreign Key | Relationship → `Country` entity |
+| `email` | Literal string | `schema:email` |
 | `created_at` | DateTime literal | `schema:dateCreated` |
-| `is_active` | Boolean literal | `xsd:boolean` |
+| `country_code` | Foreign Key | Relationship → `Country` |
 | `annual_revenue` | Numeric literal | `xsd:decimal` |
+| `is_active` | Boolean literal | `xsd:boolean` |
 
 ### Relationship Inference
 
-```
-orders.customer_id     →  customers  (FK detected — *_id + table name match)
-orders.product_id      →  products   (FK detected)
-invoices.order_id      →  orders     (FK detected)
-```
+Foreign keys detected automatically: `orders.customer_id → customers`, `claims.policy_id → policies`.
+
+### MCP Server (Model Context Protocol)
+
+**LLM-agnostic, platform-agnostic, vendor-agnostic.** 9 tools. Stdio + HTTP transports. Conversation context with pronoun resolution.
 
 ### DCAT Catalog
 
-Every KG is self-describing with W3C's Data Catalog Vocabulary:
+Every KG is self-describing with W3C's Data Catalog Vocabulary. Metadata and data in the same graph.
 
-```turtle
-<https://myco.org/catalog> a dcat:Catalog ;
-    dcterms:title "Enterprise Data Catalog" ;
-    dcat:dataset <https://myco.org/dataset/customers> .
+### Conversation Engine
 
-<https://myco.org/dataset/customers> a dcat:Dataset ;
-    dcterms:title "customers" ;
-    dcat:distribution <https://myco.org/dataset/customers/distribution> .
+Multi-turn reasoning with context tracking, pronoun resolution, and follow-up continuation. "Show customers from Norway" → "Which ones placed orders?" — works natively.
 
-<https://myco.org/dataset/customers/distribution> a dcat:Distribution ;
-    dcat:mediaType "application/parquet" ;
-    dcat:accessURL <s3://data-lake/silver/customers.parquet> .
-```
-
-### GraphAgent (NL → SPARQL)
+### Agent v2 — Explainability
 
 ```python
-agent = kg.create_agent(provider="openai", model="gpt-4o")
-results = agent.ask("Which customers from Norway spent over $1000 last month?")
-# Returns Polars DataFrame
+agent = kg.create_agent(provider="openai")
+result = agent.explain_full("Total claims by insurance line")
+# { "sparql": "SELECT ...", "confidence": 0.85,
+#   "suggested_followups": ["Filter to paid claims only", "Show by month"] }
 ```
-
-**Providers:** OpenAI, Anthropic, Ollama (local), any OpenAI-compatible endpoint.
 
 ### Entity Resolution
 
-```python
-resolver = kg.resolve_entities("CRM", "Billing", on=["email"], strategy="exact")
-resolver.link()  # inserts owl:sameAs triples
-```
-
-**Strategies:** `exact`, `fuzzy`, `phonetic`.
+Exact, fuzzy, phonetic, and **semantic** (via Zvec) matching strategies. Auto-links with `owl:sameAs`.
 
 ### SHACL Validation
 
-```python
-kg.generate_shacl_shapes("gold/shapes.ttl")  # auto-generate from schema
-result = kg.validate()                       # check nulls, duplicates, types
-```
+Auto-generate SHACL shapes from schema. Validate triples for structural integrity.
 
 ### Plugin System
 
-```python
-from autokg import register_connector
-
-@register_connector("excel")
-def read_excel(path, **kwargs):
-    return pl.read_excel(path)
-
-kg.add_table("data.xlsx", entity="Sales")  # just works
-```
+Custom connectors, template generators, serializers — register and extend without touching core code.
 
 ### Versioning & Diff
 
-```python
-kg.snapshot("v1.0", "Initial build")
-kg.snapshot("v1.1", "Added supplier data")
-diff = kg.diff("v1.0", "v1.1")  # { added: 500, removed: 12, modified: 34 }
-```
-
-### Big Data — Chunked Processing
-
-```python
-kg.add_table("s3://lake/silver/events.parquet", entity="Event", chunk_size=250_000)
-# Streams through row groups — never holds full dataset in memory
-```
+`kg.snapshot("v1.0")`, `kg.diff("v1.0", "v1.1")` — track how your knowledge graph evolves over time.
 
 ---
 
 ## CLI Reference
 
-### `autokg build`
-
 ```bash
-autokg build silver/*.parquet -n https://myco.org/ -o gold/graph.ttl
+# Build knowledge graph
+autokg build silver/*.parquet -n https://myco.com/ -o gold/graph.ttl
 autokg build --config pipeline.yaml
-```
 
-### `autokg serve`
+# Start MCP server for AI agents
+autokg mcp --store gold/kg_store --stdio          # Claude Desktop
+autokg mcp --store gold/kg_store --port 9000      # HTTP mode
 
-```bash
+# Start SPARQL endpoint
 autokg serve gold/kg_store --port 7878
-# SPARQL at http://localhost:7878/sparql
-```
 
-### `autokg query`
+# Query the graph
+autokg query "SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10" --store gold/kg_store
 
-```bash
-autokg query "SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10" --endpoint http://localhost:7878
-autokg query queries/report.sparql --endpoint http://localhost:7878 -o csv
-```
+# Validate data
+autokg validate silver/*.parquet -n https://myco.com/
 
-### `autokg validate`
+# Profile a graph
+autokg profile silver/*.parquet
 
-```bash
-autokg validate silver/customers.parquet silver/orders.parquet -n https://myco.org/
-```
-
-### `autokg profile`
-
-```bash
-autokg profile silver/*.parquet --namespace https://myco.org/
-```
-
-### `autokg diff`
-
-```bash
+# Diff snapshots
 autokg diff v1.0 v2.0 --store gold/versions
 ```
 
 ### YAML Pipeline Configuration
 
 ```yaml
-# autokg.yaml
 namespace: https://data.myco.com/
 store: gold/oxigraph_store
 
 sources:
-  - table: s3://data-lake/silver/customers.parquet
-    entity: Customer
-    id_column: customer_id
+  - table: s3://data-lake/silver/policyholders.parquet
+    entity: Policyholder
+    id_column: policyholder_id
     property_map:
-      full_name: schema:name
-      email_addr: schema:email
-      country_code: schema:addressCountry
+      first_name: schema:givenName
+      email: schema:email
+
+  - table: s3://data-lake/silver/policies.parquet
+    entity: Policy
+    id_column: policy_id
+    property_map:
+      premium_amount: schema:price
     relationships:
-      country_code: Country
-
-  - table: s3://data-lake/silver/orders.parquet
-    entity: Order
-    id_column: order_id
-    property_map:
-      total_amount: schema:price
-      order_status: schema:eventStatus
-    relationships:
-      customer_id: Customer
-      product_id: Product
-
-  - table: s3://data-lake/silver/products.parquet
-    entity: Product
-    id_column: product_id
-    property_map:
-      product_name: schema:name
-      list_price: schema:price
-
-ontology:
-  imports:
-    - https://schema.org/
-    - ontologies/custom_vocabulary.ttl
+      policyholder_id: Policyholder
+      agent_id: Agent
 
 catalog:
-  title: "Enterprise Semantic Gold Layer"
+  title: "Insurance Knowledge Graph"
   publisher: "Data Platform Team"
-  theme: "https://data.gov/theme/business"
 
 output:
   - format: turtle
-    path: gold/knowledge_graph.ttl
+    path: gold/graph.ttl
   - format: jsonld
-    path: gold/knowledge_graph.jsonld
-  - format: sparql_endpoint
-    url: https://triplestore.internal:7200/repositories/gold
-    auth: SPARQL_API_KEY
-
-validation:
-  shapes: shapes/business_rules.ttl
-  on_failure: warn
-
-agent:
-  enabled: true
-  provider: openai
-  model: gpt-4o
+    path: gold/graph.jsonld
 ```
 
 ---
 
 ## Troubleshooting & FAQ
 
-### Common Issues
-
 | Symptom | Cause | Solution |
 |---------|-------|----------|
-| `Triple count is 0` | maplib not installed, fallback not generating triples | `pip install maplib` or check PK column was detected |
-| `AttributeError: relationship_map` | Using method as property | Use `inference.to_relationship_map()` |
+| `Triple count is 0` | maplib not installed, PK not detected | `pip install maplib` or check `id_column` is correct |
 | `Oxigraph query returns empty` | Query syntax or prefix mismatch | Test with `SELECT * WHERE { ?s ?p ?o } LIMIT 5` first |
-| `Build takes too long` | Large tables, in-memory mode | Use `chunk_size` parameter or Oxigraph disk backend |
-| `Foreign keys not detected` | Column naming doesn't match conventions | Declare relationships explicitly: `relationships={"col": "Entity"}` |
-| `IRIs look wrong` | Namespace not set correctly | Check `kg.namespace` — must be a valid URL base |
-| `SPARQL endpoint refuses connection` | Oxigraph not serving | Ensure `kg.serve()` was called and port is not blocked |
+| `Foreign keys not detected` | Column naming doesn't match conventions | Declare explicitly: `relationships={"col": "Entity"}` |
+| `SPARQL endpoint refuses connection` | Oxigraph not serving | Ensure `kg.serve()` was called, port is open |
+| `MCP tools/list returns error` | MCP server not initialized | Ensure `autokg mcp --store gold/ --stdio` is running |
+| `Store persistence fails` | Invalid IRI characters (e.g., `\` in URLs) | Use valid URL characters only; pyoxigraph enforces IRI spec |
 
-### FAQ
+**Q: Do I need maplib?** No — autokg falls back to pure-Python triple generation. maplib adds Rust-level performance and SPARQL querying.
 
-**Q: Do I need maplib?**
-No. autokg falls back to pure-Python triple generation. maplib adds Rust-level performance, SPARQL querying on model objects, and HDT support. Recommended for production.
+**Q: Can I use Spark DataFrames?** Yes — `pl.from_pandas(spark_df.toPandas())` or dump to Parquet first.
 
-**Q: Can I use this with Spark DataFrames?**
-Yes. Convert to Polars DataFrame first: `pl.from_pandas(spark_df.toPandas())`. For very large Spark tables, use the chunked mode or dump to Parquet first.
+**Q: How does the MCP server handle multiple agents?** Each session gets its own conversation context via `X-Session-Id` header or separate stdio connection.
 
-**Q: What's the largest graph autokg can handle?**
-In-memory: ~100M triples (32GB). Oxigraph disk: ~500M triples (single node). For larger, push to a clustered triple store (GraphDB, Stardog, Neptune).
+**Q: Does this replace my data catalog?** It augments it. The DCAT catalog lives inside the graph, making metadata queryable alongside data.
 
-**Q: Can I update the graph incrementally?**
-Yes. `kg.add_table()` with new data, `kg.build()` again. Oxigraph stores support append. For production, rebuild on schedule (daily/hourly) or process CDC streams.
-
-**Q: How do I connect PowerBI or Tableau?**
-Export JSON-LD (`kg.write(..., format="jsonld")`) and load as JSON source. Or use a SPARQL→SQL bridge (GraphDB provides one). Or export query results as CSV: `result.write_csv("export.csv")`.
-
-**Q: Does this replace my data catalog?**
-It augments it. autokg's DCAT catalog lives *inside* the graph, so metadata and data are queried together. You can still sync to Amundsen/DataHub via the JSON-LD export.
-
-**Q: Can I use custom ontologies?**
-Yes. Pass `property_map` with your own vocabulary URIs. Or `ontology.imports` in the YAML config loads external OWL/Turtle files.
-
-**Q: How does the AI agent work without an LLM?**
-Without an LLM (no API key), `agent.explain()` returns the base SPARQL template it would send. `agent.ask()` requires an LLM to generate SPARQL from natural language.
+**Q: Is this production-ready?** v0.2.0 passes 148/148 tests with 12 insurance tables generating 24,375 triples. Tested on 200 policyholders, 300 policies, 400 claims, 546 payments, and 8 more entity types.
 
 ---
 
 ## Performance & Scale
 
-| Tier | Rows | Est. Triples | Memory | Storage | Strategy |
-|------|------|-------------|--------|---------|----------|
-| **In-Memory** | < 10M | < 100M | 4–32 GB | RAM | Direct maplib `Model` |
-| **Chunked** | 10M–500M | 100M–5B | 2–8 GB | Oxigraph disk | Row-group streaming per chunk |
-| **Distributed** | 500M+ | 5B+ | Cluster | GraphDB / Stardog / Neptune | Spark → bulk load |
+| Tier | Rows | Est. Triples | Memory | Strategy |
+|------|------|-------------|--------|----------|
+| **In-Memory** | < 10M | < 100M | 4–32 GB | Direct mapping |
+| **Chunked** | 10M–500M | 100M–5B | 2–8 GB | Row-group streaming → Oxigraph disk |
+| **Distributed** | 500M+ | 5B+ | Cluster | Spark → GraphDB / Neptune |
 
-**Benchmark** (from test suite):
-- 1,000 rows → 3,021 triples → 0.032 seconds
-- 100 rows (4 tables) → 587 triples → 0.07 seconds
+**Verified benchmarks:**
+- 1,000 rows → 3,021 triples → **0.04 seconds**
+- 3,277 rows (12 tables) → **24,375 triples → 0.54 seconds**
+- 100K rows (projected) → ~750K triples → ~15 seconds
 
 ---
 
@@ -1023,27 +612,38 @@ Without an LLM (no API key), `agent.explain()` returns the base SPARQL template 
 ```
 autokg/
 ├── src/autokg/
-│   ├── __init__.py           # Public API surface
-│   ├── _core.py              # KnowledgeGraph orchestrator
-│   ├── _connectors.py        # Parquet, Delta, CSV, JSON, SQL
-│   ├── _iri.py               # IRI minting (namespace, UUID, hash)
-│   ├── _types.py             # Type inference, PK/FK detection, auto-ontology
-│   ├── _templates.py         # Auto OTTR template generation
-│   ├── _mapper.py            # maplib wrapper + manual fallback
-│   ├── _inference.py         # Cross-table FK detection
-│   ├── _catalog.py           # DCAT catalog auto-generation
-│   ├── _serializers.py       # Turtle, JSON-LD, NTriples, RDF/XML + SPARQL push
-│   ├── _oxigraph.py          # Embedded Oxigraph store + SPARQL server
-│   ├── _agent.py             # GraphAgent — NL → SPARQL
-│   ├── _validation.py        # SHACL shape generation + data validation
-│   ├── _provenance.py        # PROV-O lineage tracking
-│   ├── _entity_resolver.py   # Entity resolution (exact, fuzzy, phonetic)
-│   ├── _profiler.py          # Graph profiling, diagnostics
-│   ├── _plugin.py            # Plugin system (connectors, templates, serializers)
-│   ├── _versioning.py        # Snapshot versioning + diff
-│   └── cli.py                # CLI: build, serve, query, validate, profile, diff
+│   ├── __init__.py            Public API surface
+│   ├── _core.py               KnowledgeGraph orchestrator
+│   ├── _connectors.py         Parquet, Delta, CSV, JSON, SQL
+│   ├── _iri.py                IRI minting (namespace, UUID, hash)
+│   ├── _types.py              Type inference, PK/FK detection, 60+ ontology mappings
+│   ├── _templates.py          Auto OTTR template generation
+│   ├── _mapper.py             maplib wrapper + manual fallback
+│   ├── _inference.py          Cross-table FK detection
+│   ├── _catalog.py            DCAT catalog auto-generation
+│   ├── _serializers.py        Turtle, JSON-LD, NTriples, RDF/XML + SPARQL push
+│   ├── _oxigraph.py           Embedded Oxigraph store + SPARQL server
+│   ├── _agent.py              GraphAgent v2 — NL→SPARQL, explain, confidence
+│   ├── _conversation.py       Multi-turn reasoning engine
+│   ├── _search.py             KGSearcher — vector/hybrid semantic search (Zvec)
+│   ├── _validation.py         SHACL + structural validation
+│   ├── _provenance.py         PROV-O lineage tracking
+│   ├── _entity_resolver.py    Entity resolution (exact, fuzzy, phonetic, semantic)
+│   ├── _profiler.py           Graph profiling & diagnostics
+│   ├── _plugin.py             Plugin system (connectors, templates, serializers)
+│   ├── _versioning.py         Snapshot versioning + diff
+│   ├── cli.py                 CLI: build, serve, query, validate, profile, diff, mcp
+│   └── server/                MCP server package
+│       ├── __init__.py
+│       ├── _mcp.py            JSON-RPC 2.0 protocol handler
+│       ├── _tools.py          9 tool implementations
+│       ├── _transport.py      Stdio + HTTP transports
+│       └── _session.py        Conversation context + pronoun resolution
+├── scripts/
+│   └── generate_insurance_data.py  12-table insurance dataset generator
 ├── tests/
-│   └── test_e2e_realworld.py # E-commerce simulation — 91/91 passing
+│   ├── test_e2e_realworld.py       E-commerce — 91/91 passing
+│   └── test_insurance_e2e.py       Insurance — 57/57 passing
 ├── pyproject.toml
 ├── README.md
 └── LICENSE
@@ -1055,6 +655,4 @@ autokg/
 
 Apache 2.0
 
----
-
-*Built on [maplib](https://github.com/DataTreehouse/maplib) by Data Treehouse AS (Rust RDF engine, SPARQL, SHACL). Powered by [Polars](https://pola.rs/) for DataFrame handling and [Oxigraph](https://github.com/oxigraph/oxigraph) for embedded triple storage. Inspired by ["The Semantic Medallion"](https://moderndata101.substack.com/p/the-semantic-medallion) by Veronika Heimsbakk.*
+*Built on [maplib](https://github.com/DataTreehouse/maplib) by Data Treehouse AS (Rust RDF engine). Powered by [Polars](https://pola.rs/), [Oxigraph](https://github.com/oxigraph/oxigraph), and [Zvec](https://github.com/alibaba/zvec) (Alibaba). MCP protocol by Anthropic. Inspired by ["The Semantic Medallion"](https://moderndata101.substack.com/p/the-semantic-medallion) by Veronika Heimsbakk.*
