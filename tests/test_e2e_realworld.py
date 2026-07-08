@@ -454,7 +454,7 @@ print("\n" + "=" * 60)
 print("PHASE 9: KnowledgeGraph Orchestrator (Full Pipeline)")
 print("=" * 60)
 
-kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False)
+kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False, strict=False)
 
 kg.add_table(customers_path, entity_type="Customer",
              id_column="customer_id",
@@ -659,7 +659,7 @@ shared_versions = Path(tempfile.mkdtemp(prefix="autokg_versions_"))
 kg._version_manager = VersionManager(str(shared_versions))
 
 # Build a slightly different version (fewer tables)
-kg2 = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False)
+kg2 = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False, strict=False)
 kg2.add_table(customers_path, entity_type="Customer", id_column="customer_id",
               property_map={"name": "schema:name", "email": "schema:email"})
 kg2.add_table(orders_path, entity_type="Order", id_column="order_id",
@@ -708,7 +708,7 @@ billing_customers = pl.DataFrame({
 billing_path = TEST_DIR / "billing_customers.parquet"
 billing_customers.write_parquet(billing_path)
 
-er_kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False)
+er_kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False, strict=False)
 er_kg.add_table(crm_path, entity_type="Customer", id_column="customer_id",
                 source_name="CRM")
 er_kg.add_table(billing_path, entity_type="Customer", id_column="cust_id",
@@ -894,14 +894,14 @@ print("=" * 60)
 
 # Empty DataFrame
 empty_df = pl.DataFrame({"id": [], "name": []})
-empty_kg = KnowledgeGraph(namespace="https://test.org/", use_maplib=False)
+empty_kg = KnowledgeGraph(namespace="https://test.org/", use_maplib=False, strict=False)
 empty_kg.add_table(empty_df, entity_type="Empty", source_name="empty")
 empty_kg.build()
 assert_gte(empty_kg.triple_count, 0, "Edge: empty DF handled gracefully")
 
 # Single-column DataFrame
 single_df = pl.DataFrame({"id": [1, 2, 3]})
-single_kg = KnowledgeGraph(namespace="https://test.org/", use_maplib=False)
+single_kg = KnowledgeGraph(namespace="https://test.org/", use_maplib=False, strict=False)
 single_kg.add_table(single_df, entity_type="Single", source_name="single")
 single_kg.build()
 triples_single = single_kg._mapper.get_triples()
@@ -913,7 +913,7 @@ null_df = pl.DataFrame({
     "name": ["Alice", None, "Charlie"],
     "email": ["alice@test.com", "bob@test.com", None],
 })
-null_kg = KnowledgeGraph(namespace="https://test.org/", use_maplib=False)
+null_kg = KnowledgeGraph(namespace="https://test.org/", use_maplib=False, strict=False)
 null_kg.add_table(null_df, entity_type="WithNulls", source_name="nulls")
 null_kg.build()
 print(f"  Null handling: {null_kg.triple_count} triples (should skip nulls)")
@@ -940,7 +940,7 @@ large_customers = pl.DataFrame({
 })
 
 start = datetime.now()
-large_kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False)
+large_kg = KnowledgeGraph(namespace="https://myco.org/", use_maplib=False, strict=False)
 large_kg.add_table(large_customers, entity_type="Customer", id_column="customer_id",
                    source_name="large_customers")
 large_kg.build()

@@ -70,7 +70,7 @@ print("\n" + "=" * 60)
 print("PHASE 1: Building Knowledge Graph from 12 Insurance Tables")
 print("=" * 60)
 
-kg = KnowledgeGraph(namespace="https://insureco.com/", use_maplib=False)
+kg = KnowledgeGraph(namespace="https://insureco.com/", use_maplib=False, strict=False)
 
 # Load all 12 tables with explicit relationships
 kg.add_table(str(DATA_DIR / "policyholders.parquet"), entity_type="Policyholder", id_column="policyholder_id",
@@ -491,7 +491,7 @@ cat_content = tmp_cat.read_text(encoding="utf-8")
 assert_true("dcat:Catalog" in cat_content or "Catalog" in cat_content, "DCAT: catalog type in serialized output")
 
 # remove_table
-kg_test = KnowledgeGraph(namespace="https://test.org/", use_maplib=False)
+kg_test = KnowledgeGraph(namespace="https://test.org/", use_maplib=False, strict=False)
 kg_test.add_table(pl.DataFrame({"id": [1, 2], "name": ["A", "B"]}), entity_type="Test", source_name="test")
 kg_test.build()
 initial_count = kg_test.triple_count

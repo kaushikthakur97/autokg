@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import tempfile
 from pathlib import Path
@@ -40,8 +42,10 @@ class KnowledgeGraph:
         store_path: Optional[str] = None,
         audit_path: Optional[str] = None,
         openlineage_endpoint: Optional[str] = None,
-        strict: bool = False,
+        strict: bool = True,
         actor: str = "unknown",
+        incremental: bool = False,
+        manifest_path: Optional[str] = None,
     ):
         self.namespace = namespace.rstrip("/#")
         self.use_maplib = use_maplib
@@ -51,6 +55,9 @@ class KnowledgeGraph:
         self.store_path = store_path
         self.strict = strict
         self.actor = actor
+        self.incremental = incremental
+        self.manifest_path = manifest_path or ((str(store_path) + "/_build_manifest.json") if store_path else None)
+        self._build_manifest: dict[str, str] = {}
 
         self._iri_minter = IRIMinter(self.namespace, strategy=iri_strategy)
         self._mapper = RDFMapper(use_maplib=use_maplib)
@@ -141,18 +148,27 @@ class KnowledgeGraph:
         return self
 
     def build(self, on_chunk: Optional[Callable[[int, int, int], None]] = None) -> "KnowledgeGraph":
-        if self.strict and self._relationships.count() == 0 and len(self._tables) > 1:
-            _logger.warning("Strict mode: No relationships declared for %d tables. Use declare_relationship() or set strict=False.", len(self._tables))
-
         rel_validation = self._relationships.validate({name: info["df"] for name, info in self._tables.items()})
         if rel_validation["errors"]:
             for err in rel_validation["errors"]:
-                _logger.error("Relationship error: %s (declared by %s, ticket %s)", err["message"], err.get("declared_by", "?"), err.get("ticket_ref", "?"))
+                _logger.error("FK INVALID: %s (declared by %s, ticket %s)", err["message"], err.get("declared_by", "?"), err.get("ticket_ref", "?"))
             if self.strict:
-                raise ValueError(f"{len(rel_validation['errors'])} relationship validation errors.")
+                raise ValueError(f"{len(rel_validation['errors'])} FK relationship errors. Fix declarations or use strict=False. Errors: {[e['message'] for e in rel_validation['errors']]}")
         if rel_validation["warnings"]:
             for warn in rel_validation["warnings"]:
-                _logger.warning("Relationship warning: %s", warn["message"])
+                _logger.warning("FK WARNING: %s", warn["message"])
+
+        if self.strict and self._relationships.count() == 0 and len(self._tables) > 1:
+            raise ValueError("Strict mode: No relationships declared for multi-table graph. Use declare_relationship() or set strict=False.")
+
+        if self.incremental and self.manifest_path:
+            self._load_manifest()
+            changed = self._detect_changes()
+            if not changed:
+                _logger.info("Incremental build: no changes detected, skipping rebuild")
+                self._built = True
+                return self
+            _logger.info("Incremental build: %d tables changed, full rebuild", len(changed))
 
         if self.auto_iri:
             self.mint_iris()
@@ -176,9 +192,38 @@ class KnowledgeGraph:
         self._mapper.add_triples(self._provenance.generate_triples())
 
         self._built = True
-        self._audit.record("build", actor=self.actor, details={"triple_count": self.triple_count, "table_count": len(self._tables), "relationship_count": self._relationships.count()})
+        if self.incremental and self.manifest_path:
+            self._save_manifest()
+        self._audit.record("build", actor=self.actor, details={"triple_count": self.triple_count, "table_count": len(self._tables), "relationship_count": self._relationships.count(), "incremental": self.incremental})
 
         return self
+
+    def _load_manifest(self):
+        if self.manifest_path and Path(self.manifest_path).exists():
+            try:
+                self._build_manifest = json.loads(Path(self.manifest_path).read_text())
+            except Exception:
+                self._build_manifest = {}
+
+    def _save_manifest(self):
+        if self.manifest_path:
+            manifest: dict[str, str] = {}
+            for name, info in self._tables.items():
+                df = info["df"]
+                row_bytes = str(df.height).encode() + str(df.columns).encode()
+                manifest[name] = hashlib.sha256(row_bytes).hexdigest()
+            Path(self.manifest_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(self.manifest_path).write_text(json.dumps(manifest))
+
+    def _detect_changes(self) -> list[str]:
+        changed: list[str] = []
+        for name, info in self._tables.items():
+            df = info["df"]
+            row_bytes = str(df.height).encode() + str(df.columns).encode()
+            current_hash = hashlib.sha256(row_bytes).hexdigest()
+            if name not in self._build_manifest or self._build_manifest[name] != current_hash:
+                changed.append(name)
+        return changed
 
     @property
     def is_built(self) -> bool:
@@ -229,7 +274,10 @@ class KnowledgeGraph:
         if self._oxigraph is None:
             self._oxigraph = OxigraphStore(store_path=path or self.store_path)
         self._oxigraph.add_triples(self._mapper.get_triples())
-        return self._oxigraph.save(path)
+        target = Path(path) if path else None
+        if target and not target.suffix:
+            target = target.with_suffix(".nt")
+        return self._oxigraph.save(str(target) if target else path)
 
     def push_to_sparql(self, endpoint_url, graph_uri=None, auth=None) -> bool:
         return push_to_sparql_endpoint(self._mapper.get_triples(), endpoint_url, graph_uri, auth)
