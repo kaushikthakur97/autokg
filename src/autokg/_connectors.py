@@ -1,32 +1,62 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import polars as pl
 
+_logger = logging.getLogger(__name__)
 
-def from_parquet(path: Union[str, Path], **kwargs) -> pl.DataFrame:
+
+def from_parquet(path, **kwargs) -> pl.DataFrame:
     return pl.read_parquet(str(path), **kwargs)
 
 
-def from_csv(path: Union[str, Path], **kwargs) -> pl.DataFrame:
+def from_csv(path, **kwargs) -> pl.DataFrame:
     return pl.read_csv(str(path), **kwargs)
 
 
-def from_json(path: Union[str, Path], **kwargs) -> pl.DataFrame:
+def from_json(path, **kwargs) -> pl.DataFrame:
     return pl.read_json(str(path), **kwargs)
 
 
-def from_delta(path: Union[str, Path], version: Optional[int] = None, **kwargs) -> pl.DataFrame:
+def from_delta(path, version=None, **kwargs) -> pl.DataFrame:
     try:
         import deltalake
     except ImportError:
-        raise ImportError(
-            "deltalake package required for Delta Lake support. Install with: pip install deltalake"
-        )
+        raise ImportError("deltalake required for Delta Lake support. pip install deltalake")
     table = deltalake.DeltaTable(str(path), version=version)
     return pl.from_arrow(table.to_pyarrow_table(**kwargs))
+
+
+def from_databricks_table(full_table_name: str, version: Optional[int] = None, **kwargs) -> pl.DataFrame:
+    try:
+        import deltalake
+    except ImportError:
+        raise ImportError("deltalake required for Databricks. pip install deltalake")
+    table = deltalake.DeltaTable(full_table_name, version=version)
+    return pl.from_arrow(table.to_pyarrow_table(**kwargs))
+
+
+def from_snowflake(account: str, warehouse: str, database: str, schema: str, table: Optional[str] = None, query: Optional[str] = None, auth: Optional[dict] = None, **kwargs) -> pl.DataFrame:
+    try:
+        import snowflake.connector
+    except ImportError:
+        raise ImportError("snowflake-connector-python required. pip install snowflake-connector-python")
+    conn_params = {"account": account, "warehouse": warehouse, "database": database, "schema": schema}
+    if auth:
+        conn_params.update(auth)
+    conn = snowflake.connector.connect(**conn_params)
+    try:
+        cursor = conn.cursor()
+        sql = query or f"SELECT * FROM {database}.{schema}.{table}"
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        return pl.DataFrame(rows, schema=columns)
+    finally:
+        conn.close()
 
 
 def from_pandas(df: "Any") -> pl.DataFrame:
@@ -37,30 +67,17 @@ def from_polars(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
-def from_sql(connection_string: str, query: str, **kwargs) -> pl.DataFrame:
-    try:
-        import connectorx as cx
-        return cx.read_sql(connection_string, query, **kwargs)
-    except ImportError:
-        pass
-    try:
-        from sqlalchemy import create_engine
-        import pandas as pd
-        engine = create_engine(connection_string)
-        pdf = pd.read_sql(query, engine, **kwargs)
-        return pl.from_pandas(pdf)
-    except ImportError:
-        raise ImportError(
-            "sqlalchemy+pandas or connectorx required for SQL support. "
-            "Install with: pip install sqlalchemy pandas connectorx"
-        )
+def scan_parquet_chunked(path: Union[str, Path], chunk_size: int = 250_000):
+    lf = pl.scan_parquet(str(path))
+    total_rows = lf.select(pl.len()).collect().item()
+    n_chunks = max(1, total_rows // chunk_size + (1 if total_rows % chunk_size else 0))
+    for i in range(n_chunks):
+        offset = i * chunk_size
+        chunk = lf.slice(offset, chunk_size).collect()
+        yield i + 1, n_chunks, chunk
 
 
-def read_table(
-    source: Union[str, Path, pl.DataFrame, "Any"],
-    format: Optional[str] = None,
-    **kwargs,
-) -> pl.DataFrame:
+def read_table(source, format=None, **kwargs) -> pl.DataFrame:
     if isinstance(source, pl.DataFrame):
         return source
     if hasattr(source, "to_pandas"):
@@ -72,15 +89,12 @@ def read_table(
                 return from_parquet(source, **kwargs)
             elif src_str.endswith(".csv") or src_str.endswith(".tsv"):
                 return from_csv(source, **kwargs)
-            elif src_str.endswith(".json") or src_str.endswith(".jsonl") or src_str.endswith(".ndjson"):
+            elif src_str.endswith(".json") or src_str.endswith(".jsonl"):
                 return from_json(source, **kwargs)
-            elif src_str.endswith(".delta") or "delta" in src_str:
+            elif ".delta" in src_str or src_str.startswith("s3://") and "delta" in src_str:
                 return from_delta(source, **kwargs)
             else:
-                raise ValueError(
-                    f"Could not determine format of '{source}'. "
-                    "Use the 'format' parameter or specify a recognized file extension."
-                )
+                raise ValueError(f"Could not determine format of '{source}'. Use the 'format' parameter.")
         if format == "parquet":
             return from_parquet(source, **kwargs)
         elif format == "csv":
@@ -94,12 +108,7 @@ def read_table(
     raise TypeError(f"Unsupported source type: {type(source)}")
 
 
-CONNECTOR_REGISTRY: dict[str, Any] = {
-    "parquet": from_parquet,
-    "csv": from_csv,
-    "json": from_json,
-    "delta": from_delta,
-}
+CONNECTOR_REGISTRY: dict[str, Any] = {"parquet": from_parquet, "csv": from_csv, "json": from_json, "delta": from_delta}
 
 
 def register_connector(name: str, reader):

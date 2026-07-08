@@ -121,17 +121,43 @@ class OxigraphStore:
         import pyoxigraph
 
         store = self._get_store()
+        self._stop_event = threading.Event()
 
         def run_server():
-            pyoxigraph.serve(store, host=host, port=port)
+            from http.server import HTTPServer, BaseHTTPRequestHandler
+            import json as _json
+
+            class HealthHandler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    if self.path == "/health":
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(_json.dumps({"status": "ok", "triples": len(store), "server": "autokg-oxigraph"}).encode())
+                    else:
+                        self.send_response(404)
+                        self.end_headers()
+                def log_message(self, format, *args):
+                    pass
+
+            health_server = HTTPServer((host, port + 1), HealthHandler)
+            health_thread = threading.Thread(target=health_server.serve_forever, daemon=True)
+            health_thread.start()
+
+            try:
+                pyoxigraph.serve(store, host=host, port=port)
+            except Exception:
+                pass
 
         self._server_thread = threading.Thread(target=run_server, daemon=True)
         self._server_thread.start()
         self._server_running = True
-        return f"http://{host}:{port}"
+        return f"http://{host}:{port} (health: http://{host}:{port + 1})"
 
     def stop(self):
         self._server_running = False
+        if hasattr(self, "_stop_event"):
+            self._stop_event.set()
 
     def save(self, path: Optional[Union[str, Path]] = None) -> str:
         target = Path(path) if path else self.store_path

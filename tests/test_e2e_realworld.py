@@ -1,4 +1,4 @@
-﻿"""
+"""
 End-to-End Test for autokg
 ============================
 Simulates a real-world e-commerce data pipeline:
@@ -234,7 +234,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from autokg import KnowledgeGraph
 from autokg import (
-    IRIMinter, TemplateGenerator, RDFMapper, RelationshipInference,
+    IRIMinter, TemplateGenerator, RDFMapper, RelationshipRegistry, RelationshipDeclaration,
     CatalogGenerator, OxigraphStore, GraphAgent, ShaclValidator,
     ProvenanceTracker, EntityResolver, GraphProfiler, VersionManager,
 )
@@ -432,21 +432,18 @@ all_dfs = {
     "suppliers": suppliers_df,
 }
 
-inference = RelationshipInference(all_dfs)
-inference.detect()
-pk_map = inference.primary_keys
-assert_eq(pk_map.get("customers"), "customer_id", "Inference: PK customers")
-assert_eq(pk_map.get("orders"), "order_id", "Inference: PK orders")
-assert_eq(pk_map.get("products"), "product_id", "Inference: PK products")
+registry = RelationshipRegistry()
+registry.declare("orders", "customer_id", "customers", declared_by="test", ticket_ref="TEST-1", justification="FK verified")
+registry.declare("orders", "product_id", "products", declared_by="test", ticket_ref="TEST-2", justification="FK verified")
 
-fks = inference.foreign_keys
+fks = registry.get_for_table("orders")
 has_customer_fk = any("customer" in str(fk).lower() for fk in fks)
-assert_true(has_customer_fk, "Inference: FK found orders->customers")
+assert_true(has_customer_fk, "Registry: FK declared orders->customers")
 
-summary = inference.summary()
-assert_gte(summary["foreign_keys_found"], 0, "Inference: FK count in summary")
+rel_count = registry.count()
+assert_gte(rel_count, 1, "Registry: at least 1 relationship declared")
 
-rel_map = inference.to_relationship_map()
+rel_map = registry.to_dict()
 print(f"  Relationship map: {json.dumps(rel_map, indent=2)}")
 
 
@@ -495,7 +492,7 @@ kg.add_table(suppliers_path, entity_type="Supplier",
              })
 
 # Test relationship inference
-kg.infer_relationships()
+# using explicit declare_relationship()
 
 # Build
 kg.build()

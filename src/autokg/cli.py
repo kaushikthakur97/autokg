@@ -313,16 +313,21 @@ def _mcp_parser(subparsers):
     p = subparsers.add_parser("mcp", help="Start MCP server (Model Context Protocol) for AI agents")
     p.add_argument("--store", "-s", required=True, help="Path to knowledge graph store")
     p.add_argument("--stdio", action="store_true", default=True, help="Stdio mode (for Claude Desktop)")
-    p.add_argument("--port", "-p", type=int, default=9000, help="HTTP port (0 = stdio only)")
+    p.add_argument("--port", "-p", type=int, default=0, help="HTTP port (0 = stdio only)")
     p.add_argument("--host", default="0.0.0.0", help="HTTP host")
+    p.add_argument("--auth-token", help="Bearer token required for HTTP access")
+    p.add_argument("--tls-cert", help="TLS certificate path")
+    p.add_argument("--tls-key", help="TLS private key path")
+    p.add_argument("--cors-origins", default="*", help="CORS allowed origins")
+    p.add_argument("--rate-limit", type=int, default=100, help="Max requests per minute per session")
 
     def handler(args):
         from ._core import KnowledgeGraph
         kg = KnowledgeGraph.from_store(args.store)
-        if args.port > 0 and not args.stdio:
+        if args.port > 0:
             from .server._transport import run_http
-            print(f"MCP server starting on http://{args.host}:{args.port}")
-            run_http(kg, host=args.host, port=args.port)
+            print(f"MCP server starting on https://{args.host}:{args.port}" if args.tls_cert else f"MCP server starting on http://{args.host}:{args.port}")
+            run_http(kg, host=args.host, port=args.port, auth_token=args.auth_token, tls_cert=args.tls_cert, tls_key=args.tls_key, cors_origins=args.cors_origins, rate_limit_rpm=args.rate_limit)
         else:
             from .server._transport import run_stdio
             print("MCP server starting in stdio mode (connect from Claude Desktop, Cursor, etc.)", file=sys.stderr)

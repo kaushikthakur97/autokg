@@ -237,3 +237,60 @@ register_tool(
     {"type": "object", "properties": {"query": {"type": "string"}, "top_k": {"type": "integer"}}, "required": ["query"]},
     _semantic_search,
 )
+
+
+def _list_sources(kg, context, args: dict) -> dict:
+    sources: list[dict] = []
+    if hasattr(kg, "_tables"):
+        for name, info in kg._tables.items():
+            src = {
+                "table": name,
+                "entity_type": info.get("entity_type", name),
+                "columns": list(info["df"].columns) if info.get("df") is not None else [],
+                "row_count": info["df"].height if info.get("df") is not None else 0,
+                "pk": info.get("pk_column"),
+                "source": info.get("source", ""),
+            }
+            if hasattr(kg, "_relationships"):
+                rels = kg._relationships.get_for_table(name)
+                src["declared_relationships"] = [{"column": r.source_column, "target": r.target_table, "declared_by": r.declared_by, "ticket": r.ticket_ref} for r in rels]
+            sources.append(src)
+    return {"sources": sources, "total": len(sources)}
+
+
+def _get_audit_log(kg, context, args: dict) -> dict:
+    action = args.get("action")
+    actor = args.get("actor")
+    if hasattr(kg, "audit_log"):
+        df = kg.audit_log()
+        if df.height > 0:
+            rows = [dict(zip(df.columns, row)) for row in df.iter_rows()]
+            if action:
+                rows = [r for r in rows if action.lower() in str(r.get("action", "")).lower()]
+            if actor:
+                rows = [r for r in rows if actor.lower() in str(r.get("actor", "")).lower()]
+            return {"audit_events": rows[:50], "total": len(rows)}
+    return {"audit_events": [], "total": 0}
+
+
+def _get_pii_policy(kg, context, args: dict) -> dict:
+    if hasattr(kg, "get_pii_policy"):
+        return kg.get_pii_policy()
+    return {"message": "PII policy not available. Add pii_policy to add_table()."}
+
+
+register_tool(
+    "list_sources", "List all source tables with their entity types, columns, row counts, and declared relationships",
+    {"type": "object", "properties": {}, "required": []},
+    _list_sources,
+)
+register_tool(
+    "get_audit_log", "Get the audit trail — every build, declaration, masking event with actor and timestamp",
+    {"type": "object", "properties": {"action": {"type": "string"}, "actor": {"type": "string"}}},
+    _get_audit_log,
+)
+register_tool(
+    "get_pii_policy", "Get the PII masking policy — which columns are masked and how",
+    {"type": "object", "properties": {}},
+    _get_pii_policy,
+)

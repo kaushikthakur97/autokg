@@ -101,7 +101,7 @@ QUESTION: {question}
 Answer concisely using only information present in the graph data. If the data doesn't contain an answer, say so."""
         return self._call_llm(prompt)
 
-    def _generate_sparql(self, question: str) -> str:
+    def _generate_sparql(self, question: str, max_retries: int = 3) -> str:
         summary = self._get_ontology_summary()
         examples = self._get_examples()
 
@@ -117,12 +117,16 @@ QUESTION: {question}
 
 Return ONLY the SPARQL query, nothing else. No markdown, no explanation. Just the raw SPARQL."""
 
-        response = self._call_llm(prompt)
-        query = self._extract_sparql(response)
-        if not query.strip().upper().startswith(("SELECT", "PREFIX", "CONSTRUCT", "ASK", "DESCRIBE")):
-            query = "SELECT * WHERE { ?s ?p ?o } LIMIT 50"
+        for attempt in range(max_retries):
+            response = self._call_llm(prompt)
+            query = self._extract_sparql(response)
+            if query.strip().upper().startswith(("SELECT", "PREFIX", "CONSTRUCT", "ASK", "DESCRIBE")):
+                return query
+            if self.verbose:
+                print(f"[GraphAgent] Retry {attempt + 1}/{max_retries}: invalid SPARQL from LLM")
+            prompt = f"{prompt}\n\nYour previous attempt returned invalid SPARQL. Generate ONLY a valid SPARQL query."
 
-        return query
+        return "SELECT * WHERE { ?s ?p ?o } LIMIT 50"
 
     def _execute(self, sparql: str) -> pl.DataFrame:
         try:

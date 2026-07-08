@@ -135,7 +135,26 @@ kg.add_table(str(DATA_DIR / "inspections.parquet"), entity_type="Inspection", id
              relationships={"location_id": "Location"})
 
 # Auto-infer any remaining relationships
-kg.infer_relationships()
+kg.declare_relationship("policies", "policyholder_id", "policyholders",
+                        declared_by="test-suite", ticket_ref="INS-TEST-1", justification="FK verified")
+kg.declare_relationship("policies", "agent_id", "agents",
+                        declared_by="test-suite", ticket_ref="INS-TEST-2", justification="FK verified")
+kg.declare_relationship("policies", "underwriter_id", "underwriters",
+                        declared_by="test-suite", ticket_ref="INS-TEST-3", justification="FK verified")
+kg.declare_relationship("coverages", "policy_id", "policies",
+                        declared_by="test-suite", ticket_ref="INS-TEST-4", justification="FK verified")
+kg.declare_relationship("claims", "policy_id", "policies",
+                        declared_by="test-suite", ticket_ref="INS-TEST-5", justification="FK verified")
+kg.declare_relationship("payments", "claim_id", "claims",
+                        declared_by="test-suite", ticket_ref="INS-TEST-6", justification="FK verified")
+kg.declare_relationship("claim_assignments", "claim_id", "claims",
+                        declared_by="test-suite", ticket_ref="INS-TEST-7", justification="FK verified")
+kg.declare_relationship("claim_assignments", "adjuster_id", "adjusters",
+                        declared_by="test-suite", ticket_ref="INS-TEST-8", justification="FK verified")
+kg.declare_relationship("locations", "policyholder_id", "policyholders",
+                        declared_by="test-suite", ticket_ref="INS-TEST-9", justification="FK verified")
+kg.declare_relationship("inspections", "location_id", "locations",
+                        declared_by="test-suite", ticket_ref="INS-TEST-10", justification="FK verified")
 
 # Build
 start = datetime.now()
