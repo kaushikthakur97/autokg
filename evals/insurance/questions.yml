@@ -1,0 +1,8 @@
+name: insurance-smoke
+cases:
+  - question: show customers
+    min_rows: 1
+  - question: show policies
+    min_rows: 1
+  - question: show claims
+    min_rows: 1

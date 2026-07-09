@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  smoke-and-e2e:
+  v1-core:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -21,15 +21,34 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[oxigraph,mcp]' pyarrow
-      - name: Starter smoke test
+      - name: v1 core smoke test
         run: |
           autokg --help
           autokg init customer360 -o /tmp/customer360
           cd /tmp/customer360
           python make_demo_data.py
+          autokg validate -c autokg.yml
           autokg build -c autokg.yml
-          autokg studio -c autokg.yml -o studio.html
-      - name: E2E scripts
+          autokg inspect gold
+          autokg report gold
+          autokg generate-sparql gold "show customers"
+          autokg ask gold "show customers"
+          autokg schema export -o autokg.schema.json
+          autokg ontology -c autokg.yml
+          autokg eval gold $GITHUB_WORKSPACE/evals/customer360/questions.yml
+          autokg benchmark --rows 100 --output benchmark_report.json
+          test -f gold/graph.ttl
+          test -f gold/graph.jsonld
+          test -f gold/graph.nt
+          test -f gold/graph.rdf
+          test -f gold/ontology.ttl
+          test -f gold/manifest.json
+          test -f gold/lineage.json
+          test -f gold/audit.jsonl
+          test -f gold/validation_report.json
+          test -f gold/build_report.html
+      - name: Existing E2E scripts
         run: |
           python tests/test_e2e_realworld.py
+          python scripts/generate_insurance_data.py
           python tests/test_insurance_e2e.py

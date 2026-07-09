@@ -1,6 +1,45 @@
-# v1 `autokg.yml` reference
+# autokg v1 Core
 
-`autokg.yml` is the production contract. It defines tables, primary keys, relationships, optional column mappings, and optional governance policy. The core build is deterministic and does not use an LLM.
+`autokg` v1 core is a deterministic, self-contained, platform-agnostic, LLM-agnostic table-to-knowledge-graph compiler.
+
+## Contract
+
+Input:
+
+- table definitions
+- primary keys
+- manual relationship declarations
+- optional column/property/PII policies
+
+Output:
+
+- `graph.ttl`
+- `graph.jsonld`
+- `graph.nt`
+- `graph.rdf`
+- `ontology.ttl`
+- `manifest.json`
+- `lineage.json`
+- `audit.jsonl`
+- `validation_report.json`
+- `build_report.html`
+- optional local `store/`
+
+No LLM API key is required. No cloud platform is required.
+
+## Commands
+
+```bash
+autokg init customer360
+cd autokg_project
+python make_demo_data.py
+autokg validate -c autokg.yml
+autokg build -c autokg.yml
+autokg inspect gold
+autokg report gold
+```
+
+## Config shape
 
 ```yaml
 project:
@@ -11,7 +50,6 @@ project:
   fail_on_invalid_fk: true
   fail_on_missing_pk: true
   fail_on_duplicate_pk: true
-  incremental: true
 
 tables:
   - name: customers
@@ -42,19 +80,9 @@ outputs:
   rdf:
     enabled: true
     formats: [turtle, jsonld, ntriples, rdfxml]
-  report: {enabled: true}
 
 store:
   enabled: true
   type: local
   path: gold/store
-```
-
-## Commands
-
-```bash
-autokg validate -c autokg.yml
-autokg build -c autokg.yml
-autokg inspect gold
-autokg report gold
 ```

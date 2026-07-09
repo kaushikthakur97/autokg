@@ -64,7 +64,7 @@ class ProvenanceTracker:
         ai = self._agent_iri
 
         triples.append({"subject": ri, "predicate": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "is_iri": True, "object": f"{PROV}Activity"})
-        triples.append({"subject": ri, "predicate": f"{PROV}startedAtTime", "object": self._run_started.isoformat() + "Z", "datatype": "http://www.w3.org/2001/XMLSchema#dateTime"})
+        triples.append({"subject": ri, "predicate": f"{PROV}startedAtTime", "object": self._run_started.isoformat().replace("+00:00", "Z"), "datatype": "http://www.w3.org/2001/XMLSchema#dateTime"})
         triples.append({"subject": ri, "predicate": f"{PROV}wasAssociatedWith", "is_iri": True, "object": ai})
 
         triples.append({"subject": ai, "predicate": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "is_iri": True, "object": f"{PROV}Agent"})

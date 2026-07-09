@@ -1,39 +1,68 @@
-namespace: https://demo.autokg.ai/insurance
-actor: data-platform@example.com
-strict: true
-store: gold/store
-incremental: true
-sources:
+project:
+  name: insurance-demo
+  namespace: https://demo.autokg.ai/insurance
+  output_dir: gold
+  strict: true
+  fail_on_invalid_fk: true
+  incremental: true
+
+tables:
   - name: customers
-    path: silver/customers.csv
+    source: silver/customers.csv
     entity: Customer
-    id_column: customer_id
-    pii_policy: {strategy: hash}
+    primary_key: customer_id
+    columns:
+      customer_id: {property: schema:identifier, required: true}
+      name: {property: schema:name, pii: true, pii_type: person_name, mask: partial}
+      email: {property: schema:email, pii: true, pii_type: email, mask: hash}
+      segment: {property: ex:segment}
+
   - name: policies
-    path: silver/policies.csv
+    source: silver/policies.csv
     entity: Policy
-    id_column: policy_id
+    primary_key: policy_id
+    columns:
+      policy_id: {property: schema:identifier, required: true}
+      policy_type: {property: schema:category}
+      status: {property: schema:eventStatus}
+
   - name: claims
-    path: silver/claims.csv
+    source: silver/claims.csv
     entity: Claim
-    id_column: claim_id
+    primary_key: claim_id
+    columns:
+      claim_id: {property: schema:identifier, required: true}
+      claim_amount: {property: ex:claimAmount, type: decimal}
+      status: {property: schema:eventStatus}
+
 relationships:
-  - from_table: policies
-    from_column: customer_id
-    to_table: customers
-    to_column: customer_id
+  - name: policy_belongs_to_customer
+    from: {table: policies, column: customer_id}
+    to: {table: customers, column: customer_id}
+    predicate: ex:belongsToCustomer
+    cardinality: many_to_one
+    required: true
     declared_by: data-platform@example.com
-    ticket_ref: DEMO-1
-    justification: A policy belongs to a customer.
-  - from_table: claims
-    from_column: policy_id
-    to_table: policies
-    to_column: policy_id
+    ticket: DEMO-1
+    description: A policy belongs to a customer.
+
+  - name: claim_against_policy
+    from: {table: claims, column: policy_id}
+    to: {table: policies, column: policy_id}
+    predicate: ex:againstPolicy
+    cardinality: many_to_one
+    required: true
     declared_by: data-platform@example.com
-    ticket_ref: DEMO-2
-    justification: A claim is filed against a policy.
-output:
-  - path: gold/graph.ttl
-    format: turtle
-  - path: gold/graph.jsonld
-    format: jsonld
+    ticket: DEMO-2
+    description: A claim is filed against a policy.
+
+outputs:
+  rdf:
+    enabled: true
+    formats: [turtle, jsonld, ntriples, rdfxml]
+  report: {enabled: true}
+
+store:
+  enabled: true
+  type: local
+  path: gold/store

@@ -294,3 +294,115 @@ register_tool(
     {"type": "object", "properties": {}},
     _get_pii_policy,
 )
+
+
+def _query_engine(kg, args: dict):
+    from autokg._query_backend import QueryEngine
+    graph = args.get("graph") or getattr(kg, "_autokg_output_dir", None) or getattr(kg, "store_path", None)
+    if not graph:
+        raise ValueError("No autokg output directory available. Pass graph or start MCP with --store gold/store or gold/.")
+    llm_cfg = args.get("llm") or {}
+    if not hasattr(kg, "_autokg_query_engine"):
+        kg._autokg_query_engine = QueryEngine(graph, llm_config=llm_cfg)
+    return kg._autokg_query_engine
+
+
+def _generate_sparql(kg, context, args: dict) -> dict:
+    question = args.get("question", "")
+    session_id = args.get("session_id") or "mcp-default"
+    qe = _query_engine(kg, args)
+    result = qe.generate_sparql(question, session_id=session_id)
+    context.record(f"generate_sparql: {question}", result)
+    return result
+
+
+def _validate_sparql(kg, context, args: dict) -> dict:
+    qe = _query_engine(kg, args)
+    return qe.validate_sparql(args.get("sparql", ""))
+
+
+def _execute_sparql(kg, context, args: dict) -> dict:
+    qe = _query_engine(kg, args)
+    result = qe.execute_sparql(args.get("sparql", ""))
+    context.record(f"execute_sparql", result.get("rows", [])[:10])
+    return result
+
+
+def _ask_graph(kg, context, args: dict) -> dict:
+    question = args.get("question", "")
+    session_id = args.get("session_id") or "mcp-default"
+    qe = _query_engine(kg, args)
+    ans = qe.ask(question, session_id=session_id)
+    result = ans.__dict__
+    context.record(question, ans.rows[:10])
+    return result
+
+
+def _start_session(kg, context, args: dict) -> dict:
+    qe = _query_engine(kg, args)
+    return {"session_id": qe.start_session()}
+
+
+register_tool(
+    "generate_sparql", "Convert natural language to safe SPARQL using the graph schema and optional LLM provider",
+    {"type": "object", "properties": {"question": {"type": "string"}, "session_id": {"type": "string"}, "graph": {"type": "string"}, "llm": {"type": "object"}}, "required": ["question"]},
+    _generate_sparql,
+)
+register_tool(
+    "validate_sparql", "Validate SPARQL for parseability and safety before execution",
+    {"type": "object", "properties": {"sparql": {"type": "string"}, "graph": {"type": "string"}}, "required": ["sparql"]},
+    _validate_sparql,
+)
+register_tool(
+    "execute_sparql", "Execute a safe SPARQL query against the autokg graph package",
+    {"type": "object", "properties": {"sparql": {"type": "string"}, "graph": {"type": "string"}}, "required": ["sparql"]},
+    _execute_sparql,
+)
+register_tool(
+    "ask_graph", "Generate SPARQL from natural language, validate it, execute it, and return rows with evidence",
+    {"type": "object", "properties": {"question": {"type": "string"}, "session_id": {"type": "string"}, "graph": {"type": "string"}, "llm": {"type": "object"}}, "required": ["question"]},
+    _ask_graph,
+)
+register_tool(
+    "start_session", "Start a multi-turn autokg query session",
+    {"type": "object", "properties": {"graph": {"type": "string"}, "llm": {"type": "object"}}, "required": []},
+    _start_session,
+)
+
+
+def _get_schema_v11(kg, context, args: dict) -> dict:
+    try:
+        qe = _query_engine(kg, args)
+        return qe.get_schema()
+    except Exception:
+        return _get_schema(kg, context, args)
+
+
+def _get_lineage_v11(kg, context, args: dict) -> dict:
+    try:
+        qe = _query_engine(kg, args)
+        return qe.schema.lineage
+    except Exception:
+        return _get_lineage(kg, context, args)
+
+
+def _get_manifest(kg, context, args: dict) -> dict:
+    qe = _query_engine(kg, args)
+    return qe.schema.manifest
+
+
+register_tool(
+    "get_schema", "Get the autokg schema index: entities, tables, relationships, namespace, and manifest metadata",
+    {"type": "object", "properties": {"graph": {"type": "string"}}, "required": []},
+    _get_schema_v11,
+)
+register_tool(
+    "get_lineage", "Get lineage.json from the built autokg graph package",
+    {"type": "object", "properties": {"graph": {"type": "string"}}},
+    _get_lineage_v11,
+)
+register_tool(
+    "get_manifest", "Get manifest.json from the built autokg graph package",
+    {"type": "object", "properties": {"graph": {"type": "string"}}},
+    _get_manifest,
+)

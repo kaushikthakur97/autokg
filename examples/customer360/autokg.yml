@@ -1,39 +1,68 @@
-namespace: https://demo.autokg.ai/customer360
-actor: data-platform@example.com
-strict: true
-store: gold/store
-incremental: true
-sources:
+project:
+  name: customer360-demo
+  namespace: https://demo.autokg.ai/customer360
+  output_dir: gold
+  strict: true
+  fail_on_invalid_fk: true
+  incremental: true
+
+tables:
   - name: customers
-    path: silver/customers.csv
+    source: silver/customers.csv
     entity: Customer
-    id_column: customer_id
-    pii_policy: {strategy: hash}
+    primary_key: customer_id
+    columns:
+      customer_id: {property: schema:identifier, required: true}
+      name: {property: schema:name, pii: true, pii_type: person_name, mask: partial}
+      email: {property: schema:email, pii: true, pii_type: email, mask: hash}
+      segment: {property: ex:segment}
+
   - name: orders
-    path: silver/orders.csv
+    source: silver/orders.csv
     entity: Order
-    id_column: order_id
+    primary_key: order_id
+    columns:
+      order_id: {property: schema:identifier, required: true}
+      amount: {property: schema:price, type: decimal}
+
   - name: products
-    path: silver/products.csv
+    source: silver/products.csv
     entity: Product
-    id_column: product_id
+    primary_key: product_id
+    columns:
+      product_id: {property: schema:identifier, required: true}
+      name: {property: schema:name}
+      risk_level: {property: ex:riskLevel}
+
 relationships:
-  - from_table: orders
-    from_column: customer_id
-    to_table: customers
-    to_column: customer_id
+  - name: order_placed_by_customer
+    from: {table: orders, column: customer_id}
+    to: {table: customers, column: customer_id}
+    predicate: ex:placedBy
+    inverse_predicate: ex:placedOrder
+    cardinality: many_to_one
+    required: true
     declared_by: data-platform@example.com
-    ticket_ref: DEMO-1
-    justification: A customer places orders.
-  - from_table: orders
-    from_column: product_id
-    to_table: products
-    to_column: product_id
+    ticket: DEMO-1
+    description: An order is placed by a customer.
+
+  - name: order_contains_product
+    from: {table: orders, column: product_id}
+    to: {table: products, column: product_id}
+    predicate: ex:containsProduct
+    cardinality: many_to_one
+    required: true
     declared_by: data-platform@example.com
-    ticket_ref: DEMO-2
-    justification: An order contains a product.
-output:
-  - path: gold/graph.ttl
-    format: turtle
-  - path: gold/graph.jsonld
-    format: jsonld
+    ticket: DEMO-2
+    description: An order contains a product.
+
+outputs:
+  rdf:
+    enabled: true
+    formats: [turtle, jsonld, ntriples, rdfxml]
+  report: {enabled: true}
+
+store:
+  enabled: true
+  type: local
+  path: gold/store

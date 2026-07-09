@@ -84,6 +84,8 @@ class KnowledgeGraph:
     def from_store(cls, store_path, namespace="http://example.org/", **kwargs) -> "KnowledgeGraph":
         kg = cls(namespace=namespace, store_path=str(store_path), **kwargs)
         kg._oxigraph = OxigraphStore(store_path=str(store_path), read_only=True)
+        sp = Path(store_path)
+        kg._autokg_output_dir = str(sp.parent if sp.name == "store" else sp)
         if store_path and Path(store_path).exists() and kg._oxigraph._oxigraph_available:
             kg._oxigraph._get_store()
         kg._built = True
