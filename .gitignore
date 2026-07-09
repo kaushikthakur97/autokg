@@ -10,3 +10,7 @@ dist/
 .coverage
 htmlcov/
 .ipynb_checkpoints/
+.env
+silver_insurance/
+gold_databricks/
+data/
