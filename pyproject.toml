@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "autokg"
 version = "0.3.0"
-description = "One Build. Infinite Questions. Auto-generate governed RDF knowledge graphs with MCP AI agent support."
+description = "The knowledge layer for your data stack. Auto-generate governed RDF knowledge graphs with MCP AI agent support."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
