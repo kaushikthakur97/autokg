@@ -1,0 +1,39 @@
+namespace: https://demo.autokg.ai/customer360
+actor: data-platform@example.com
+strict: true
+store: gold/store
+incremental: true
+sources:
+  - name: customers
+    path: silver/customers.csv
+    entity: Customer
+    id_column: customer_id
+    pii_policy: {strategy: hash}
+  - name: orders
+    path: silver/orders.csv
+    entity: Order
+    id_column: order_id
+  - name: products
+    path: silver/products.csv
+    entity: Product
+    id_column: product_id
+relationships:
+  - from_table: orders
+    from_column: customer_id
+    to_table: customers
+    to_column: customer_id
+    declared_by: data-platform@example.com
+    ticket_ref: DEMO-1
+    justification: A customer places orders.
+  - from_table: orders
+    from_column: product_id
+    to_table: products
+    to_column: product_id
+    declared_by: data-platform@example.com
+    ticket_ref: DEMO-2
+    justification: An order contains a product.
+output:
+  - path: gold/graph.ttl
+    format: turtle
+  - path: gold/graph.jsonld
+    format: jsonld

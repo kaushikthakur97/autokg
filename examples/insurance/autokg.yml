@@ -1,0 +1,39 @@
+namespace: https://demo.autokg.ai/insurance
+actor: data-platform@example.com
+strict: true
+store: gold/store
+incremental: true
+sources:
+  - name: customers
+    path: silver/customers.csv
+    entity: Customer
+    id_column: customer_id
+    pii_policy: {strategy: hash}
+  - name: policies
+    path: silver/policies.csv
+    entity: Policy
+    id_column: policy_id
+  - name: claims
+    path: silver/claims.csv
+    entity: Claim
+    id_column: claim_id
+relationships:
+  - from_table: policies
+    from_column: customer_id
+    to_table: customers
+    to_column: customer_id
+    declared_by: data-platform@example.com
+    ticket_ref: DEMO-1
+    justification: A policy belongs to a customer.
+  - from_table: claims
+    from_column: policy_id
+    to_table: policies
+    to_column: policy_id
+    declared_by: data-platform@example.com
+    ticket_ref: DEMO-2
+    justification: A claim is filed against a policy.
+output:
+  - path: gold/graph.ttl
+    format: turtle
+  - path: gold/graph.jsonld
+    format: jsonld

@@ -35,7 +35,7 @@ class KnowledgeGraph:
         self,
         namespace: str = "http://example.org/",
         *,
-        use_maplib: bool = True,
+        use_maplib: bool = False,
         auto_iri: bool = True,
         auto_template: bool = True,
         iri_strategy: str = "namespace",
@@ -84,7 +84,7 @@ class KnowledgeGraph:
     def from_store(cls, store_path, namespace="http://example.org/", **kwargs) -> "KnowledgeGraph":
         kg = cls(namespace=namespace, store_path=str(store_path), **kwargs)
         kg._oxigraph = OxigraphStore(store_path=str(store_path), read_only=True)
-        if store_path and Path(store_path).exists():
+        if store_path and Path(store_path).exists() and kg._oxigraph._oxigraph_available:
             kg._oxigraph._get_store()
         kg._built = True
         return kg
@@ -274,10 +274,7 @@ class KnowledgeGraph:
         if self._oxigraph is None:
             self._oxigraph = OxigraphStore(store_path=path or self.store_path)
         self._oxigraph.add_triples(self._mapper.get_triples())
-        target = Path(path) if path else None
-        if target and not target.suffix:
-            target = target.with_suffix(".nt")
-        return self._oxigraph.save(str(target) if target else path)
+        return self._oxigraph.save(path or self.store_path)
 
     def push_to_sparql(self, endpoint_url, graph_uri=None, auth=None) -> bool:
         return push_to_sparql_endpoint(self._mapper.get_triples(), endpoint_url, graph_uri, auth)

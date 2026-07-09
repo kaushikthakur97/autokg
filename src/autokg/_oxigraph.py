@@ -21,6 +21,25 @@ def _sanitize_iri(value: str) -> str:
     return value
 
 
+def _extract_limit(sparql: str, default: int = 100) -> int:
+    m = re.search(r"\bLIMIT\s+(\d+)", sparql or "", flags=re.IGNORECASE)
+    if not m:
+        return default
+    try:
+        return max(0, int(m.group(1)))
+    except ValueError:
+        return default
+
+
+def _nt_iri(value: str) -> str:
+    return "<" + _sanitize_iri(value) + ">"
+
+
+def _nt_literal(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
 class OxigraphStore:
     def __init__(self, store_path: Optional[Union[str, Path]] = None, read_only: bool = False, auth_token: Optional[str] = None):
         self.store_path = Path(store_path) if store_path else None
@@ -105,7 +124,13 @@ class OxigraphStore:
 
     def query(self, sparql: str) -> Any:
         if not self._oxigraph_available:
-            return []
+            triples = getattr(self, "_fallback_triples", [])
+            rows = []
+            # Minimal fallback for smoke tests and local demos without pyoxigraph.
+            # It intentionally supports only simple SELECT ?s ?p ?o patterns.
+            for t in triples[: _extract_limit(sparql, default=100)]:
+                rows.append({"s": t.get("subject"), "p": t.get("predicate"), "o": t.get("object")})
+            return rows
         import pyoxigraph
         store = self._get_store()
         results = store.query(sparql)
@@ -139,7 +164,17 @@ class OxigraphStore:
 
     def dump(self, format: str = "ntriples") -> bytes:
         if not self._oxigraph_available:
-            return b""
+            lines = []
+            for t in getattr(self, "_fallback_triples", []):
+                s = _nt_iri(str(t.get("subject", "")))
+                p = _nt_iri(str(t.get("predicate", "")))
+                obj = str(t.get("object", ""))
+                if t.get("is_iri") or t.get("object_iri"):
+                    o = _nt_iri(obj)
+                else:
+                    o = _nt_literal(obj)
+                lines.append(f"{s} {p} {o} .")
+            return ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
         import pyoxigraph
         store = self._get_store()
         return store.dump(format)
@@ -254,6 +289,12 @@ class OxigraphStore:
         if target is None:
             raise ValueError("No store path specified")
         if not self._oxigraph_available:
+            if target.suffix:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(self.dump("ntriples"))
+            else:
+                target.mkdir(parents=True, exist_ok=True)
+                (target / "data.nt").write_bytes(self.dump("ntriples"))
             return str(target)
 
         import pyoxigraph

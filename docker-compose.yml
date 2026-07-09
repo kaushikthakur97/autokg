@@ -1,0 +1,18 @@
+services:
+  autokg-demo:
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./examples/customer360:/workspace
+    command: ["build", "-c", "autokg.yml"]
+
+  autokg-mcp:
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./examples/customer360:/workspace
+    command: ["mcp", "--store", "gold/store", "--port", "9000", "--host", "0.0.0.0", "--auth-token", "dev-token"]
+    ports:
+      - "9000:9000"
+    depends_on:
+      - autokg-demo

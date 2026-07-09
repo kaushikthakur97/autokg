@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "autokg-demo": {
+      "command": "autokg",
+      "args": [
+        "mcp",
+        "--store",
+        "/home/user/autokg-work/examples/insurance/gold/store",
+        "--stdio"
+      ]
+    }
+  }
+}

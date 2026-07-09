@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "autokg contributors" }]
-keywords = ["knowledge-graph", "rdf", "sparql", "semantic", "medallion", "data-catalog", "mcp", "pii", "audit"]
+keywords = ["knowledge-graph", "rdf", "sparql", "semantic-layer", "mcp", "ai-agents", "data-governance", "graphrag", "pii", "audit", "lineage"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "License :: OSI Approved :: Apache Software License",
@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Database",
 ]
 
-dependencies = ["polars>=0.20.0"]
+dependencies = ["polars>=0.20.0", "PyYAML>=6.0"]
 
 [project.optional-dependencies]
 pandas = ["pandas>=2.0"]
